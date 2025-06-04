@@ -1,0 +1,728 @@
+import tensorrt as trt
+import numpy as np
+import cv2
+import time
+import os
+import gc
+import random
+import colorsys
+import pycuda.driver as cuda
+import pycuda.autoinit
+
+class TensorRTInference:
+    def __init__(self, engine_path):
+        # Initialize CUDA context
+        self.cuda_ctx = cuda.Device(0).make_context()
+        
+        # Load TensorRT engine
+        self.logger = trt.Logger(trt.Logger.WARNING)
+        with open(engine_path, 'rb') as f:
+            self.engine = trt.Runtime(self.logger).deserialize_cuda_engine(f.read())
+        
+        if self.engine is None:
+            raise RuntimeError(f"Failed to load engine from {engine_path}")
+        
+        self.context = self.engine.create_execution_context()
+        
+        # Allocate GPU memory for inputs and outputs
+        self.allocate_buffers()
+        
+        # Get input/output shapes
+        self.input_shape = self.engine.get_binding_shape(0)
+        self.output_shape = self.engine.get_binding_shape(1)
+        
+        print(f"✅ Model loaded: {os.path.basename(engine_path)}")
+        print(f"   Input shape: {self.input_shape}")
+        print(f"   Output shape: {self.output_shape}")
+        
+        # Get input dimensions for preprocessing
+        self.input_h = self.input_shape[2]
+        self.input_w = self.input_shape[3]
+        
+        print(f"   Expected input size: {self.input_w}x{self.input_h}")
+        
+        # Determine YOLO version and output format
+        self.determine_yolo_format()
+        
+        # Generate colors for each class
+        self.colors = self._generate_colors(self.num_classes)
+        
+        # Default class names (you can modify these to match your custom classes)
+        self.class_names = self._get_default_class_names()
+    
+    def allocate_buffers(self):
+        """Allocate GPU memory for inputs and outputs"""
+        self.inputs = []
+        self.outputs = []
+        self.bindings = []
+        self.stream = cuda.Stream()
+        
+        for binding in self.engine:
+            binding_idx = self.engine.get_binding_index(binding)
+            size = trt.volume(self.engine.get_binding_shape(binding_idx))
+            dtype = trt.nptype(self.engine.get_binding_dtype(binding))
+            
+            # Allocate host and device buffers
+            host_mem = cuda.pagelocked_empty(size, dtype)
+            device_mem = cuda.mem_alloc(host_mem.nbytes)
+            
+            # Append the device buffer to device bindings
+            self.bindings.append(int(device_mem))
+            
+            # Append to the appropriate list
+            if self.engine.binding_is_input(binding_idx):
+                self.inputs.append({'host': host_mem, 'device': device_mem})
+            else:
+                self.outputs.append({'host': host_mem, 'device': device_mem})
+    
+    def determine_yolo_format(self):
+        """Determine YOLO format based on output shape"""
+        # For custom models with 4 classes:
+        # YOLOv8 output: [batch, 8, num_anchors] where 8 = 4 (bbox) + 4 (classes)
+        # YOLOv5/v12 output: [batch, num_anchors, 9] where 9 = 5 (bbox + conf) + 4 (classes)
+        
+        if len(self.output_shape) == 3:
+            # Check the second dimension to determine format
+            feature_dim = self.output_shape[1]
+            
+            # YOLOv8 format: features are in dim 1
+            if feature_dim < 20:  # Small number suggests it's the feature dimension
+                self.yolo_version = 'v8'
+                self.num_classes = feature_dim - 4  # 4 = x, y, w, h
+                self.num_anchors = self.output_shape[2]
+                print(f"   Detected YOLOv8 format")
+                print(f"   Features: {feature_dim}, Anchors: {self.num_anchors}")
+            else:
+                # YOLOv5/v12 format: features are in dim 2
+                self.yolo_version = 'v5'
+                self.num_classes = self.output_shape[2] - 5  # 5 = x, y, w, h, conf
+                self.num_anchors = self.output_shape[1]
+                print(f"   Detected YOLOv5/v12 format")
+                print(f"   Anchors: {self.num_anchors}, Features: {self.output_shape[2]}")
+        else:
+            # Default to v5 format with 4 classes
+            self.yolo_version = 'v5'
+            self.num_classes = 4
+            print(f"   Using default YOLOv5 format")
+        
+        print(f"   Number of classes: {self.num_classes}")
+    
+    def _generate_colors(self, num_classes):
+        """Generate distinct colors for each class"""
+        colors = []
+        for i in range(num_classes):
+            hue = i / num_classes
+            saturation = 0.8
+            value = 0.9
+            rgb = colorsys.hsv_to_rgb(hue, saturation, value)
+            colors.append([int(c * 255) for c in rgb])
+        return colors
+    
+    def _get_default_class_names(self):
+        """Get default class names - modify this for your custom classes"""
+        # Your 4 custom defect classes
+        custom_classes = {
+            0: "inclusion",
+            1: "patches",
+            2: "pitted_surface", 
+            3: "scratches"
+        }
+        
+        # Verify we have the expected number of classes
+        if self.num_classes == 4:
+            print("   ✅ Using custom defect classes")
+            return custom_classes
+        else:
+            print(f"   ⚠️  Warning: Model has {self.num_classes} classes, but we defined 4 custom classes")
+            # Generate generic names for any extra classes
+            class_names = {}
+            for i in range(self.num_classes):
+                if i in custom_classes:
+                    class_names[i] = custom_classes[i]
+                else:
+                    class_names[i] = f"class_{i}"
+            return class_names
+    
+    def preprocess(self, image):
+        """Preprocess image for YOLO"""
+        # Store original dimensions for later scaling
+        self.orig_h, self.orig_w = image.shape[:2]
+        
+        # Resize image to match model's expected input size
+        resized = cv2.resize(image, (self.input_w, self.input_h))
+        
+        # Convert BGR to RGB and normalize
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+        normalized = rgb.astype(np.float32) / 255.0
+        
+        # Transpose to CHW and add batch dimension
+        transposed = np.transpose(normalized, (2, 0, 1))
+        batched = np.expand_dims(transposed, axis=0)
+        
+        return batched
+    
+    def postprocess_v8(self, output, conf_threshold=0.5, nms_threshold=0.4):
+        """Post-process YOLOv8 output"""
+        # YOLOv8 output shape: [batch, 8, num_anchors] for 4 classes
+        output = output[0]  # Remove batch dimension
+        
+        # Transpose to [num_anchors, 8]
+        output = output.T
+        
+        boxes = []
+        scores = []
+        class_ids = []
+        
+        # Check if coordinates are normalized or in pixels
+        max_coord = np.max(output[:, :4])
+        is_normalized = max_coord <= 1.0
+        
+        if is_normalized:
+            print(f"   Detected normalized coordinates (max: {max_coord:.3f})")
+            x_scale = self.orig_w
+            y_scale = self.orig_h
+        else:
+            print(f"   Detected pixel coordinates (max: {max_coord:.1f})")
+            x_scale = self.orig_w / self.input_w
+            y_scale = self.orig_h / self.input_h
+        
+        print(f"   Processing {output.shape[0]} detections...")
+        
+        for detection in output:
+            # First 4 values are box coordinates
+            x_center, y_center, width, height = detection[:4]
+            
+            # Get class scores (no separate objectness in v8)
+            class_scores = detection[4:4+self.num_classes]
+            class_id = np.argmax(class_scores)
+            confidence = class_scores[class_id]
+            
+            if confidence > conf_threshold:
+                # Scale coordinates
+                if is_normalized:
+                    # For normalized coords, multiply by image dimensions
+                    x_center *= self.orig_w
+                    y_center *= self.orig_h
+                    width *= self.orig_w
+                    height *= self.orig_h
+                else:
+                    # For pixel coords, scale from input to original size
+                    x_center *= x_scale
+                    y_center *= y_scale
+                    width *= x_scale
+                    height *= y_scale
+                
+                # Convert to corner coordinates
+                x1 = int(x_center - width / 2)
+                y1 = int(y_center - height / 2)
+                x2 = int(x_center + width / 2)
+                y2 = int(y_center + height / 2)
+                
+                # Clamp to image bounds
+                x1 = max(0, min(x1, self.orig_w))
+                y1 = max(0, min(y1, self.orig_h))
+                x2 = max(0, min(x2, self.orig_w))
+                y2 = max(0, min(y2, self.orig_h))
+                
+                boxes.append([x1, y1, x2, y2])
+                scores.append(float(confidence))
+                class_ids.append(int(class_id))
+        
+        print(f"   Found {len(boxes)} detections above threshold {conf_threshold}")
+        
+        # Apply NMS
+        if len(boxes) > 0:
+            indices = cv2.dnn.NMSBoxes(boxes, scores, conf_threshold, nms_threshold)
+            if len(indices) > 0:
+                indices = indices.flatten()
+                print(f"   After NMS: {len(indices)} detections")
+                return [boxes[i] for i in indices], [scores[i] for i in indices], [class_ids[i] for i in indices]
+        
+        return [], [], []
+    
+    def postprocess_v5(self, output, conf_threshold=0.5, nms_threshold=0.4):
+        """Post-process YOLOv5/v12 output"""
+        # Remove batch dimension if present
+        if len(output.shape) == 3:
+            output = output[0]
+        
+        # Ensure correct shape
+        if output.shape[0] > output.shape[1]:
+            output = output.T
+        
+        boxes = []
+        scores = []
+        class_ids = []
+        
+        # Check if coordinates are normalized or in pixels
+        max_coord = np.max(output[:4, :])
+        is_normalized = max_coord <= 1.0
+        
+        if is_normalized:
+            print(f"   Detected normalized coordinates (max: {max_coord:.3f})")
+            x_scale = self.orig_w
+            y_scale = self.orig_h
+        else:
+            print(f"   Detected pixel coordinates (max: {max_coord:.1f})")
+            x_scale = self.orig_w / self.input_w
+            y_scale = self.orig_h / self.input_h
+        
+        print(f"   Processing {output.shape[1]} detections...")
+        
+        for detection in output.T:
+            # Extract objectness score
+            objectness = detection[4]
+            
+            if objectness > conf_threshold:
+                # Extract class scores (only 4 classes)
+                class_scores = detection[5:5+self.num_classes] * objectness
+                class_id = np.argmax(class_scores)
+                confidence = class_scores[class_id]
+                
+                if confidence > conf_threshold:
+                    # Extract box coordinates
+                    center_x = detection[0]
+                    center_y = detection[1]
+                    width = detection[2]
+                    height = detection[3]
+                    
+                    # Scale coordinates
+                    if is_normalized:
+                        # For normalized coords, multiply by image dimensions
+                        center_x *= self.orig_w
+                        center_y *= self.orig_h
+                        width *= self.orig_w
+                        height *= self.orig_h
+                    else:
+                        # For pixel coords, scale from input to original size
+                        center_x *= x_scale
+                        center_y *= y_scale
+                        width *= x_scale
+                        height *= y_scale
+                    
+                    # Convert to corner coordinates
+                    x1 = int(center_x - width / 2)
+                    y1 = int(center_y - height / 2)
+                    x2 = int(center_x + width / 2)
+                    y2 = int(center_y + height / 2)
+                    
+                    # Clamp to image bounds
+                    x1 = max(0, min(x1, self.orig_w))
+                    y1 = max(0, min(y1, self.orig_h))
+                    x2 = max(0, min(x2, self.orig_w))
+                    y2 = max(0, min(y2, self.orig_h))
+                    
+                    boxes.append([x1, y1, x2, y2])
+                    scores.append(float(confidence))
+                    class_ids.append(int(class_id))
+        
+        print(f"   Found {len(boxes)} detections above threshold {conf_threshold}")
+        
+        # Apply NMS
+        if len(boxes) > 0:
+            indices = cv2.dnn.NMSBoxes(boxes, scores, conf_threshold, nms_threshold)
+            if len(indices) > 0:
+                indices = indices.flatten()
+                print(f"   After NMS: {len(indices)} detections")
+                return [boxes[i] for i in indices], [scores[i] for i in indices], [class_ids[i] for i in indices]
+        
+        return [], [], []
+    
+    def postprocess(self, output, conf_threshold=0.5, nms_threshold=0.4):
+        """Post-process YOLO output based on detected version"""
+        if self.yolo_version == 'v8':
+            return self.postprocess_v8(output, conf_threshold, nms_threshold)
+        else:
+            return self.postprocess_v5(output, conf_threshold, nms_threshold)
+    
+    def draw_detections(self, image, boxes, scores, class_ids):
+        """Draw bounding boxes and labels on image"""
+        result_image = image.copy()
+        
+        for i, (box, score, class_id) in enumerate(zip(boxes, scores, class_ids)):
+            x1, y1, x2, y2 = box
+            
+            # Ensure coordinates are within image bounds
+            x1 = max(0, x1)
+            y1 = max(0, y1)
+            x2 = min(self.orig_w, x2)
+            y2 = min(self.orig_h, y2)
+            
+            # Get class name and color
+            class_name = self.class_names.get(class_id, f"class_{class_id}")
+            color = self.colors[class_id % len(self.colors)]
+            
+            # Draw bounding box
+            cv2.rectangle(result_image, (x1, y1), (x2, y2), color, 2)
+            
+            # Prepare label
+            label = f"{class_name}: {score:.2f}"
+            
+            # Get text size for background rectangle
+            (text_width, text_height), baseline = cv2.getTextSize(
+                label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
+            )
+            
+            # Draw background rectangle for text
+            cv2.rectangle(
+                result_image,
+                (x1, max(0, y1 - text_height - baseline - 5)),
+                (x1 + text_width, y1),
+                color,
+                -1
+            )
+            
+            # Draw text
+            cv2.putText(
+                result_image,
+                label,
+                (x1, max(text_height + baseline + 5, y1 - baseline - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2
+            )
+        
+        return result_image
+    
+    def infer(self, image):
+        """Run inference using PyCUDA"""
+        # Preprocess
+        input_tensor = self.preprocess(image)
+        
+        # Copy input to GPU
+        np.copyto(self.inputs[0]['host'], input_tensor.ravel())
+        cuda.memcpy_htod_async(self.inputs[0]['device'], self.inputs[0]['host'], self.stream)
+        
+        # Run inference
+        self.context.execute_async_v2(bindings=self.bindings, stream_handle=self.stream.handle)
+        
+        # Copy output back to CPU
+        cuda.memcpy_dtoh_async(self.outputs[0]['host'], self.outputs[0]['device'], self.stream)
+        
+        # Synchronize
+        self.stream.synchronize()
+        
+        # Reshape output
+        output = self.outputs[0]['host'].reshape(self.output_shape)
+        
+        return output
+    
+    def infer_and_visualize(self, image, conf_threshold=0.5, nms_threshold=0.4, save_path=None):
+        """Run inference and return visualization"""
+        # Run inference
+        output = self.infer(image)
+        
+        # Debug output values
+        print(f"\n   📊 Output statistics:")
+        print(f"      Shape: {output.shape}")
+        print(f"      Min: {output.min():.4f}, Max: {output.max():.4f}, Mean: {output.mean():.4f}")
+        
+        # Check a few sample detections
+        if self.yolo_version == 'v8' and len(output.shape) == 3:
+            sample_output = output[0].T[:5]  # First 5 detections
+            print(f"      Sample detections (first 5):")
+            for i, det in enumerate(sample_output):
+                print(f"        Det {i}: bbox=[{det[0]:.2f}, {det[1]:.2f}, {det[2]:.2f}, {det[3]:.2f}], classes=[{', '.join([f'{c:.3f}' for c in det[4:8]])}]")
+        elif self.yolo_version == 'v5' and len(output.shape) >= 2:
+            sample_output = output[0] if len(output.shape) == 3 else output
+            sample_output = sample_output.T[:5] if sample_output.shape[0] > sample_output.shape[1] else sample_output[:, :5].T
+            print(f"      Sample detections (first 5):")
+            for i, det in enumerate(sample_output):
+                if len(det) >= 9:
+                    print(f"        Det {i}: bbox=[{det[0]:.2f}, {det[1]:.2f}, {det[2]:.2f}, {det[3]:.2f}], conf={det[4]:.3f}, classes=[{', '.join([f'{c:.3f}' for c in det[5:9]])}]")
+        
+        # Post-process to get detections
+        boxes, scores, class_ids = self.postprocess(output, conf_threshold, nms_threshold)
+        
+        # Draw detections
+        result_image = self.draw_detections(image, boxes, scores, class_ids)
+        
+        # Print detection summary
+        print(f"\n   🎯 Detected {len(boxes)} objects:")
+        for i, (box, score, class_id) in enumerate(zip(boxes, scores, class_ids)):
+            class_name = self.class_names.get(class_id, f"class_{class_id}")
+            print(f"      {i+1}. {class_name}: {score:.3f} at [{box[0]}, {box[1]}, {box[2]}, {box[3]}]")
+        
+        if len(boxes) == 0:
+            print(f"   ⚠️  No detections found! Try lowering conf_threshold (current: {conf_threshold})")
+        
+        # Save image if path provided
+        if save_path:
+            cv2.imwrite(save_path, result_image)
+            print(f"   💾 Saved visualization: {save_path}")
+        
+        return result_image, boxes, scores, class_ids
+    
+    def __del__(self):
+        """Clean up CUDA context"""
+        try:
+            if hasattr(self, 'cuda_ctx'):
+                self.cuda_ctx.pop()
+        except:
+            pass
+
+def create_test_image(width=832, height=832):
+    """Create a test image matching model input size"""
+    # Create a more realistic test image with some patterns
+    test_img = np.zeros((height, width, 3), dtype=np.uint8)
+    
+    # Add some random shapes to simulate defects
+    for _ in range(5):
+        # Random circle (inclusion-like)
+        center = (np.random.randint(50, width-50), np.random.randint(50, height-50))
+        radius = np.random.randint(10, 50)
+        color = (np.random.randint(100, 255), np.random.randint(100, 255), np.random.randint(100, 255))
+        cv2.circle(test_img, center, radius, color, -1)
+    
+    for _ in range(3):
+        # Random lines (scratch-like)
+        pt1 = (np.random.randint(0, width), np.random.randint(0, height))
+        pt2 = (np.random.randint(0, width), np.random.randint(0, height))
+        color = (np.random.randint(100, 255), np.random.randint(100, 255), np.random.randint(100, 255))
+        cv2.line(test_img, pt1, pt2, color, np.random.randint(1, 5))
+    
+    # Add some noise
+    noise = np.random.randint(0, 50, (height, width, 3), dtype=np.uint8)
+    test_img = cv2.add(test_img, noise)
+    
+    return test_img
+
+def benchmark_model(engine_path, test_images=None, visualize=True):
+    """Benchmark the model with 10 iterations and optional visualization"""
+    
+    print(f"\n{'='*70}")
+    print(f"🚀 BENCHMARKING: {os.path.basename(engine_path)}")
+    print(f"{'='*70}")
+    
+    model = None
+    try:
+        # Load model
+        model = TensorRTInference(engine_path)
+        
+        # Process ALL test images for visualization
+        if visualize and test_images:
+            print("\n🖼️  Visualizing all test images...")
+            valid_images = []
+            
+            for img_path in test_images:
+                if os.path.exists(img_path):
+                    test_img = cv2.imread(img_path)
+                    if test_img is not None:
+                        valid_images.append((img_path, test_img))
+                        print(f"   ✅ Found: {img_path} {test_img.shape}")
+                    else:
+                        print(f"   ❌ Failed to load: {img_path}")
+                else:
+                    print(f"   ❌ Not found: {img_path}")
+            
+            # Visualize each image
+            for img_path, test_img in valid_images:
+                image_name = os.path.splitext(os.path.basename(img_path))[0]
+                print(f"\n📸 Processing: {image_name}")
+                
+                try:
+                    result_image, boxes, scores, class_ids = model.infer_and_visualize(
+                        test_img, 
+                        conf_threshold=0.1,  # Lower threshold to catch more detections
+                        nms_threshold=0.4,
+                        save_path=f"result_{os.path.splitext(os.path.basename(engine_path))[0]}_{image_name}.jpg"
+                    )
+                except Exception as e:
+                    print(f"   ❌ Visualization failed for {image_name}: {e}")
+        
+        # Select one image for benchmarking (or create dummy)
+        test_image = None
+        image_name = "dummy_image"
+        
+        if test_images:
+            for img_path in test_images:
+                if os.path.exists(img_path):
+                    test_image = cv2.imread(img_path)
+                    if test_image is not None:
+                        image_name = os.path.splitext(os.path.basename(img_path))[0]
+                        print(f"\n📊 Using {img_path} for speed benchmark")
+                        break
+        
+        if test_image is None:
+            test_image = create_test_image(model.input_w, model.input_h)
+            print(f"\n📊 Created test image for speed benchmark: {test_image.shape}")
+        
+        # Single inference test
+        print("\n🧪 Testing single inference...")
+        try:
+            start_time = time.time()
+            output = model.infer(test_image)
+            single_time = time.time() - start_time
+            print(f"✅ Single inference: {single_time*1000:.2f} ms")
+            print(f"   Output shape: {output.shape}")
+            
+        except Exception as e:
+            print(f"❌ Single inference failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+        
+        # Warmup runs
+        print("\n🔥 Warming up model (3 runs)...")
+        for i in range(3):
+            try:
+                _ = model.infer(test_image)
+                print(f"   Warmup {i+1}/3 ✅")
+            except Exception as e:
+                print(f"   Warmup {i+1}/3 ❌: {e}")
+        
+        print("✅ Warmup complete!")
+        
+        # Main benchmark - 10 iterations
+        print(f"\n🏃 Benchmark test (10 iterations):")
+        times = []
+        successful_runs = 0
+        
+        for i in range(10):
+            try:
+                start_time = time.time()
+                output = model.infer(test_image)
+                inference_time = time.time() - start_time
+                times.append(inference_time)
+                successful_runs += 1
+                
+                print(f"   Run {i+1:2d}/10: {inference_time*1000:6.2f} ms ✅")
+                
+                # Small delay to prevent GPU overload
+                time.sleep(0.05)
+                
+            except Exception as e:
+                print(f"   Run {i+1:2d}/10: Failed ❌ - {e}")
+            
+            # Garbage collection every 5 runs
+            if (i + 1) % 5 == 0:
+                gc.collect()
+        
+        if successful_runs == 0:
+            print("❌ All runs failed")
+            return None
+        
+        # Calculate statistics
+        times = np.array(times)
+        avg_time = np.mean(times)
+        min_time = np.min(times)
+        max_time = np.max(times)
+        std_time = np.std(times)
+        fps = 1.0 / avg_time
+        
+        # Results summary
+        print(f"\n📊 RESULTS SUMMARY:")
+        print(f"   Successful runs: {successful_runs}/10")
+        print(f"   Average inference time: {avg_time*1000:.2f} ms")
+        print(f"   Minimum inference time: {min_time*1000:.2f} ms")
+        print(f"   Maximum inference time: {max_time*1000:.2f} ms")
+        print(f"   Standard deviation: {std_time*1000:.2f} ms")
+        print(f"   Average FPS: {fps:.2f}")
+        print(f"   Model input size: {model.input_w}x{model.input_h}")
+        
+        return {
+            'model': os.path.basename(engine_path),
+            'avg_time_ms': avg_time * 1000,
+            'min_time_ms': min_time * 1000,
+            'max_time_ms': max_time * 1000,
+            'fps': fps,
+            'success_rate': successful_runs / 10,
+            'input_size': f"{model.input_w}x{model.input_h}"
+        }
+        
+    except Exception as e:
+        print(f"❌ Error benchmarking {engine_path}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    finally:
+        # Clean up model to free GPU memory
+        if model is not None:
+            del model
+            gc.collect()
+            cuda.Context.synchronize()
+
+def main():
+    print("🎯 TensorRT Inference Benchmark with Visualization")
+    print(f"📍 Current directory: {os.getcwd()}")
+    
+    # Find all engine files
+    engine_files = [f for f in os.listdir('.') if f.endswith('.engine')]
+    
+    if not engine_files:
+        print("❌ No engine files found!")
+        return
+    
+    print(f"\n✅ Found {len(engine_files)} engine files:")
+    for engine in engine_files:
+        size = os.path.getsize(engine) / 1024 / 1024
+        print(f"   📦 {engine} ({size:.2f} MB)")
+    
+    # Test images (your custom defect images)
+    test_images = [
+        'scratches.jpg',
+        'pitted.jpg', 
+        'patches.jpg',
+        'inclusion.jpg'
+    ]
+    
+    # Ask user if they want visualization
+    try:
+        visualize = input("\n🖼️  Enable visualization? (y/n) [default: y]: ").lower()
+        visualize = visualize != 'n'
+    except:
+        visualize = True
+    
+    if visualize:
+        print("✅ Visualization enabled - results will be saved as images")
+    else:
+        print("⚡ Visualization disabled - faster benchmarking")
+    
+    # Benchmark each model
+    results = []
+    for engine_path in engine_files:
+        result = benchmark_model(engine_path, test_images, visualize)
+        if result:
+            results.append(result)
+        
+        # Clean up GPU memory between models
+        gc.collect()
+        cuda.Context.synchronize()
+        
+        # Add separator between models
+        if engine_path != engine_files[-1]:
+            print(f"\n{'-'*70}")
+            time.sleep(1)  # Give GPU time to clean up
+    
+    # Final comparison if multiple models
+    if len(results) > 1:
+        print(f"\n{'='*70}")
+        print("🏆 FINAL COMPARISON")
+        print(f"{'='*70}")
+        
+        print(f"{'Model':<25} {'Input Size':<12} {'Avg Time (ms)':<15} {'FPS':<8} {'Success':<8}")
+        print("-" * 75)
+        
+        for result in results:
+            success_pct = f"{result['success_rate']*100:.0f}%"
+            print(f"{result['model']:<25} {result['input_size']:<12} {result['avg_time_ms']:<15.2f} {result['fps']:<8.2f} {success_pct:<8}")
+        
+        # Find fastest model
+        fastest = min(results, key=lambda x: x['avg_time_ms'])
+        print(f"\n🥇 Fastest model: {fastest['model']} ({fastest['fps']:.2f} FPS)")
+    
+    elif len(results) == 1:
+        result = results[0]
+        print(f"\n🏆 FINAL RESULT:")
+        print(f"   Model: {result['model']}")
+        print(f"   Input size: {result['input_size']}")
+        print(f"   Average: {result['avg_time_ms']:.2f} ms ({result['fps']:.2f} FPS)")
+        print(f"   Range: {result['min_time_ms']:.2f} - {result['max_time_ms']:.2f} ms")
+        print(f"   Success rate: {result['success_rate']*100:.0f}%")
+    
+    if visualize:
+        print(f"\n📸 Check current directory for result_*.jpg visualization files!")
+
+if __name__ == "__main__":
+    main()

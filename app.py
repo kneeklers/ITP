@@ -4,25 +4,21 @@ import numpy as np
 import threading
 import time
 import os
-import tensorrt as trt
-import pycuda.driver as cuda
-import pycuda.autoinit
+from trt_infer import TensorRTInference
 
 app = Flask(__name__)
 
 # Global variables
 camera = None
 camera_lock = threading.Lock()
-TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
-# Create models directory if it doesn't exist
-os.makedirs('models', exist_ok=True)
+# Load the model once at startup for efficiency
+MODEL_PATH = 'models/your_model.engine'
+model = TensorRTInference(MODEL_PATH)
 
-def load_engine(engine_path):
-    with open(engine_path, 'rb') as f:
-        runtime = trt.Runtime(TRT_LOGGER)
-        engine = runtime.deserialize_cuda_engine(f.read())
-        return engine
+# Create uploads and results directories if they don't exist
+os.makedirs('uploads', exist_ok=True)
+os.makedirs('static/results', exist_ok=True)
 
 def get_camera():
     global camera
@@ -37,50 +33,37 @@ def release_camera():
         camera = None
 
 def detect_defects(frame):
-    # TODO: Implement your defect detection algorithm here
-    # This is a placeholder that just returns the original frame
+    # Placeholder for live defect detection
     return frame
 
 def process_image(image_path):
     try:
-        engine = load_engine('models/your_model.engine')
-        context = engine.create_execution_context()
+        image = cv2.imread(image_path)
+        if image is None:
+            print("Failed to load image:", image_path)
+            return None
 
-        img = cv2.imread(image_path)
-        img = cv2.resize(img, (832, 832))
-        img = img.astype(np.float32) / 255.0
+        # Run inference and visualization
+        result_image, boxes, scores, class_ids = model.infer_and_visualize(
+            image,
+            conf_threshold=0.3,  # adjust as needed
+            nms_threshold=0.4,
+            save_path=None
+        )
 
-        input_binding_idx = engine.get_binding_index('images')
-        output_binding_idx = engine.get_binding_index('output 0')
-        input_shape = engine.get_binding_shape(input_binding_idx)
-        output_shape = engine.get_binding_shape(output_binding_idx)
+        # Save the result image to static/results for web access
+        result_filename = f"result_{int(time.time())}.jpg"
+        result_path = os.path.join('static/results', result_filename)
+        cv2.imwrite(result_path, result_image)
 
-        # Prepare input and output buffers
-        input_buffer = np.zeros(input_shape, dtype=np.float32)
-        output_buffer = np.zeros(output_shape, dtype=np.float32)
-        input_buffer[0] = img.transpose(2, 0, 1)  # HWC to CHW
-
-        # Allocate device memory
-        d_input = cuda.mem_alloc(input_buffer.nbytes)
-        d_output = cuda.mem_alloc(output_buffer.nbytes)
-
-        # Copy input to device
-        cuda.memcpy_htod(d_input, input_buffer)
-
-        # Run inference
-        bindings = [int(d_input), int(d_output)]
-        context.execute_v2(bindings=bindings)
-
-        # Copy output from device
-        cuda.memcpy_dtoh(output_buffer, d_output)
-
-        defect_type = np.argmax(output_buffer[0])
-        confidence = float(output_buffer[0][defect_type] * 100)
-
-        return {
-            'defect_type': f'Defect Type {defect_type}',
-            'confidence': f'{confidence:.2f}'
+        # Prepare summary for the web page
+        summary = {
+            'defect_type': ', '.join([model.class_names.get(c, str(c)) for c in class_ids]) if class_ids else 'None',
+            'confidence': ', '.join([f'{s*100:.2f}' for s in scores]) if scores else '0.00',
+            'result_image': result_filename
         }
+        return summary
+
     except Exception as e:
         print(f"Error processing image: {str(e)}")
         return None
@@ -111,7 +94,6 @@ def upload_page():
             return render_template('upload.html', result=None)
         file = request.files['image']
         filename = os.path.join('uploads', file.filename)
-        os.makedirs('uploads', exist_ok=True)
         file.save(filename)
         result = process_image(filename)
         os.remove(filename)
