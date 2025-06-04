@@ -98,7 +98,8 @@ def upload_page():
         result = process_image(filename)
         os.remove(filename)
         return render_template('upload.html', result=result)
-    return render_template('upload.html', result=None)
+    print("Attempting to load upload page")
+    return "Upload page reached!"
 
 @app.route('/video_feed')
 def video_feed():
