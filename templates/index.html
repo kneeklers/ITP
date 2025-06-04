@@ -35,6 +35,8 @@
             background-color: #f8f9fa;
             border-radius: 8px;
         }
+        .container { margin-top: 50px; }
+        .video-container { margin-top: 20px; }
     </style>
 </head>
 <body class="bg-light">
@@ -44,18 +46,28 @@
         </div>
     </nav>
 
-    <div class="container mt-4">
+    <div class="container">
+        <h1>Metal Sheet Defect Detection</h1>
+        <div class="row">
+            <div class="col-md-8">
+                <div class="video-container">
+                    <img src="{{ url_for('video_feed') }}" class="video-feed" alt="Video Feed">
+                    <div class="status-indicator">
+                        <span class="badge bg-success">Live</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="mt-4">
+                    <a href="/upload" class="btn btn-primary">Upload Image for Analysis</a>
+                </div>
+            </div>
+        </div>
         <div class="row">
             <div class="col-md-8 mx-auto">
                 <div class="card shadow">
                     <div class="card-body">
                         <h5 class="card-title text-center mb-4">Live Feed</h5>
-                        <div class="video-container">
-                            <img src="{{ url_for('video_feed') }}" class="video-feed" alt="Video Feed">
-                            <div class="status-indicator">
-                                <span class="badge bg-success">Live</span>
-                            </div>
-                        </div>
                         <div class="defect-info">
                             <h6>Detection Status</h6>
                             <p class="mb-0">No defects detected</p>
