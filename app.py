@@ -1,12 +1,10 @@
 from flask import Flask, render_template, Response
-from flask_socketio import SocketIO
 import cv2
 import numpy as np
 import threading
 import time
 
 app = Flask(__name__)
-socketio = SocketIO(app)
 
 # Global variables
 camera = None
@@ -15,7 +13,17 @@ camera_lock = threading.Lock()
 def get_camera():
     global camera
     if camera is None:
-        camera = cv2.VideoCapture(0)  # Use 0 for default camera, adjust if needed
+        # Try different camera indices if 0 doesn't work
+        for i in range(2):  # Try camera 0 and 1
+            try:
+                camera = cv2.VideoCapture(i)
+                if camera.isOpened():
+                    # Set lower resolution for better performance
+                    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                    return camera
+            except:
+                continue
     return camera
 
 def release_camera():
@@ -33,15 +41,18 @@ def generate_frames():
     while True:
         with camera_lock:
             camera = get_camera()
+            if camera is None:
+                continue
+                
             success, frame = camera.read()
             if not success:
-                break
+                continue
             else:
                 # Process frame for defect detection
                 processed_frame = detect_defects(frame)
                 
-                # Convert to JPEG
-                ret, buffer = cv2.imencode('.jpg', processed_frame)
+                # Convert to JPEG with lower quality for better performance
+                ret, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
                 frame = buffer.tobytes()
                 
                 yield (b'--frame\r\n'
@@ -65,6 +76,7 @@ def shutdown():
 
 if __name__ == '__main__':
     try:
-        socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+        # Use a simpler server configuration
+        app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
     finally:
         release_camera() 
