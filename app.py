@@ -74,6 +74,10 @@ def process_image(image_path):
         defect_type = np.argmax(output_buffer[0])
         confidence = float(output_buffer[0][defect_type] * 100)
         
+        print("Engine bindings:")
+        for i in range(engine.num_bindings):
+            print(f"Binding {i}: {engine.get_binding_name(i)}")
+        
         return {
             'defect_type': f'Defect Type {defect_type}',
             'confidence': f'{confidence:.2f}'
