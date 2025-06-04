@@ -103,32 +103,19 @@ def generate_frames():
 def index():
     return render_template('index.html')
 
-@app.route('/upload')
+@app.route('/upload', methods=['GET', 'POST'])
 def upload_page():
-    return render_template('upload.html')
-
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    if 'image' not in request.files:
-        return redirect(request.url)
-    
-    file = request.files['image']
-    if file.filename == '':
-        return redirect(request.url)
-    
-    if file:
-        # Save the uploaded file
+    if request.method == 'POST':
+        if 'image' not in request.files or request.files['image'].filename == '':
+            return render_template('upload.html', result=None)
+        file = request.files['image']
         filename = os.path.join('uploads', file.filename)
         os.makedirs('uploads', exist_ok=True)
         file.save(filename)
-        
-        # Process the image
         result = process_image(filename)
-        
-        # Clean up
         os.remove(filename)
-        
         return render_template('upload.html', result=result)
+    return render_template('upload.html', result=None)
 
 @app.route('/video_feed')
 def video_feed():
