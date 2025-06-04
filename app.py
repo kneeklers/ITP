@@ -94,12 +94,13 @@ def upload_page():
             return render_template('upload.html', result=None)
         file = request.files['image']
         filename = os.path.join('uploads', file.filename)
+        os.makedirs('uploads', exist_ok=True) # Ensure uploads dir exists
         file.save(filename)
-        result = process_image(filename)
+        result = process_image(filename) # NOTE: process_image should be commented out or simplified for this test
         os.remove(filename)
         return render_template('upload.html', result=result)
-    print("Attempting to load upload page")
-    return "Upload page reached!"
+    # Original GET request handling
+    return render_template('upload.html', result=None)
 
 @app.route('/video_feed')
 def video_feed():
