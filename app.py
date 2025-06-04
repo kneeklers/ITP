@@ -1,5 +1,4 @@
 from flask import Flask, render_template, Response, request, redirect, url_for
-from flask_socketio import SocketIO
 import cv2
 import numpy as np
 import threading
@@ -8,7 +7,6 @@ import os
 import tensorrt as trt
 
 app = Flask(__name__)
-socketio = SocketIO(app)
 
 # Global variables
 camera = None
@@ -129,6 +127,6 @@ def shutdown():
 
 if __name__ == '__main__':
     try:
-        socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+        app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
     finally:
         release_camera() 
