@@ -6,8 +6,6 @@ import threading
 import time
 import os
 import tensorrt as trt
-import pycuda.driver as cuda
-import pycuda.autoinit
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -56,27 +54,27 @@ def process_image(image_path):
         img = cv2.resize(img, (224, 224))  # Adjust size based on your model's requirements
         img = img.astype(np.float32) / 255.0  # Normalize
         
-        # Prepare input and output buffers
-        input_shape = (1, 3, 224, 224)  # Adjust based on your model
-        output_shape = (1, num_classes)  # Adjust based on your model
+        # Get input and output binding indices
+        input_binding_idx = engine.get_binding_index('input')  # Replace 'input' with your model's input name
+        output_binding_idx = engine.get_binding_index('output')  # Replace 'output' with your model's output name
         
-        # Allocate GPU memory
-        d_input = cuda.mem_alloc(1 * img.nbytes)
-        d_output = cuda.mem_alloc(1 * output_shape[0] * np.dtype(np.float32).itemsize)
+        # Get input and output shapes
+        input_shape = engine.get_binding_shape(input_binding_idx)
+        output_shape = engine.get_binding_shape(output_binding_idx)
         
-        # Copy input to GPU
-        cuda.memcpy_htod(d_input, img)
+        # Allocate memory for input and output
+        input_buffer = np.zeros(input_shape, dtype=np.float32)
+        output_buffer = np.zeros(output_shape, dtype=np.float32)
+        
+        # Copy input data
+        input_buffer[0] = img.transpose(2, 0, 1)  # HWC to CHW format
         
         # Run inference
-        context.execute_v2(bindings=[int(d_input), int(d_output)])
-        
-        # Get results
-        output = np.empty(output_shape, dtype=np.float32)
-        cuda.memcpy_dtoh(output, d_output)
+        context.execute_v2(bindings=[input_buffer.ctypes.data, output_buffer.ctypes.data])
         
         # Process results
-        defect_type = np.argmax(output[0])
-        confidence = float(output[0][defect_type] * 100)
+        defect_type = np.argmax(output_buffer[0])
+        confidence = float(output_buffer[0][defect_type] * 100)
         
         return {
             'defect_type': f'Defect Type {defect_type}',
