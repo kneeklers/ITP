@@ -5,6 +5,8 @@ import threading
 import time
 import os
 import tensorrt as trt
+import pycuda.driver as cuda
+import pycuda.autoinit
 
 app = Flask(__name__)
 
@@ -41,41 +43,40 @@ def detect_defects(frame):
 
 def process_image(image_path):
     try:
-        # Load the TensorRT engine
         engine = load_engine('models/your_model.engine')
-        
-        # Create execution context
         context = engine.create_execution_context()
-        
-        # Load and preprocess the image
+
         img = cv2.imread(image_path)
-        img = cv2.resize(img, (832, 832))  # Match your model's input size
-        img = img.astype(np.float32) / 255.0  # Normalize
-        
-        # Use the correct binding names
+        img = cv2.resize(img, (832, 832))
+        img = img.astype(np.float32) / 255.0
+
         input_binding_idx = engine.get_binding_index('images')
         output_binding_idx = engine.get_binding_index('output 0')
-        
-        # Get input and output shapes
         input_shape = engine.get_binding_shape(input_binding_idx)
         output_shape = engine.get_binding_shape(output_binding_idx)
-        
-        print("Model expects input shape:", input_shape)
-        
-        # Allocate memory for input and output
+
+        # Prepare input and output buffers
         input_buffer = np.zeros(input_shape, dtype=np.float32)
         output_buffer = np.zeros(output_shape, dtype=np.float32)
-        
-        # Copy input data
-        input_buffer[0] = img.transpose(2, 0, 1)  # HWC to CHW format
-        
+        input_buffer[0] = img.transpose(2, 0, 1)  # HWC to CHW
+
+        # Allocate device memory
+        d_input = cuda.mem_alloc(input_buffer.nbytes)
+        d_output = cuda.mem_alloc(output_buffer.nbytes)
+
+        # Copy input to device
+        cuda.memcpy_htod(d_input, input_buffer)
+
         # Run inference
-        context.execute_v2(bindings=[input_buffer.ctypes.data, output_buffer.ctypes.data])
-        
-        # Process results
+        bindings = [int(d_input), int(d_output)]
+        context.execute_v2(bindings=bindings)
+
+        # Copy output from device
+        cuda.memcpy_dtoh(output_buffer, d_output)
+
         defect_type = np.argmax(output_buffer[0])
         confidence = float(output_buffer[0][defect_type] * 100)
-        
+
         return {
             'defect_type': f'Defect Type {defect_type}',
             'confidence': f'{confidence:.2f}'
