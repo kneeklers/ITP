@@ -49,7 +49,7 @@ def process_image(image_path):
         
         # Load and preprocess the image
         img = cv2.imread(image_path)
-        img = cv2.resize(img, (224, 224))  # Adjust size based on your model's requirements
+        img = cv2.resize(img, (832, 832))  # Match your model's input size
         img = img.astype(np.float32) / 255.0  # Normalize
         
         # Use the correct binding names
@@ -59,6 +59,8 @@ def process_image(image_path):
         # Get input and output shapes
         input_shape = engine.get_binding_shape(input_binding_idx)
         output_shape = engine.get_binding_shape(output_binding_idx)
+        
+        print("Model expects input shape:", input_shape)
         
         # Allocate memory for input and output
         input_buffer = np.zeros(input_shape, dtype=np.float32)
