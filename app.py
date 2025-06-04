@@ -52,9 +52,9 @@ def process_image(image_path):
         img = cv2.resize(img, (224, 224))  # Adjust size based on your model's requirements
         img = img.astype(np.float32) / 255.0  # Normalize
         
-        # Get input and output binding indices
-        input_binding_idx = engine.get_binding_index('input')  # Replace 'input' with your model's input name
-        output_binding_idx = engine.get_binding_index('output')  # Replace 'output' with your model's output name
+        # Use the correct binding names
+        input_binding_idx = engine.get_binding_index('images')
+        output_binding_idx = engine.get_binding_index('output 0')
         
         # Get input and output shapes
         input_shape = engine.get_binding_shape(input_binding_idx)
@@ -73,10 +73,6 @@ def process_image(image_path):
         # Process results
         defect_type = np.argmax(output_buffer[0])
         confidence = float(output_buffer[0][defect_type] * 100)
-        
-        print("Engine bindings:")
-        for i in range(engine.num_bindings):
-            print(f"Binding {i}: {engine.get_binding_name(i)}")
         
         return {
             'defect_type': f'Defect Type {defect_type}',
