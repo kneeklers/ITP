@@ -29,6 +29,7 @@ def get_camera():
                 # Try different camera backends
                 for backend in [cv2.CAP_ANY, cv2.CAP_V4L2, cv2.CAP_DSHOW]:
                     try:
+                        print(f"Trying camera backend: {backend}")
                         camera = cv2.VideoCapture(0, backend)
                         if camera.isOpened():
                             # Set camera properties
@@ -36,9 +37,10 @@ def get_camera():
                             camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                             camera.set(cv2.CAP_PROP_FPS, 30)
                             # Try to read a test frame
-                            ret, _ = camera.read()
-                            if ret:
+                            ret, frame = camera.read()
+                            if ret and frame is not None:
                                 print(f"Camera initialized successfully with backend {backend}")
+                                print(f"Frame size: {frame.shape}")
                                 return camera
                             else:
                                 print(f"Failed to read test frame with backend {backend}")
@@ -151,18 +153,20 @@ def generate_frames():
     consecutive_failures = 0
     max_failures = 5
     
+    print("Starting frame generation")
+    
     while True:
         try:
             with camera_lock:
                 camera = get_camera()
                 if camera is None:
-                    print("Camera not available")
+                    print("Camera not available in generate_frames")
                     time.sleep(1)  # Wait before retrying
                     continue
                 
                 success, frame = camera.read()
-                if not success:
-                    print("Failed to read frame")
+                if not success or frame is None:
+                    print("Failed to read frame or frame is None")
                     consecutive_failures += 1
                     if consecutive_failures >= max_failures:
                         print("Too many consecutive failures, reinitializing camera")
@@ -175,7 +179,7 @@ def generate_frames():
                 frame_count += 1
                 
                 if frame_count % 30 == 0:  # Log every 30 frames
-                    print(f"Streaming frame {frame_count}")
+                    print(f"Streaming frame {frame_count}, size: {frame.shape}")
                 
                 # Process frame if needed
                 processed_frame = detect_defects(frame)
@@ -202,6 +206,7 @@ def generate_frames():
 @app.route('/')
 def index():
     try:
+        print("Accessing index route")
         # Release model when switching to live stream
         release_model()
         
@@ -211,6 +216,7 @@ def index():
             print("Failed to initialize camera in index route")
             return "Error: Could not initialize camera", 500
         
+        print("Successfully initialized camera in index route")
         return render_template('index.html')
     except Exception as e:
         print(f"Error in index route: {e}")
@@ -219,6 +225,7 @@ def index():
 @app.route('/video_feed')
 def video_feed():
     try:
+        print("Starting video feed")
         return Response(generate_frames(),
                        mimetype='multipart/x-mixed-replace; boundary=frame')
     except Exception as e:
