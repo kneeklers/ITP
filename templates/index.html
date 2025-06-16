@@ -89,7 +89,17 @@
             </div>
             <div class="col-md-4">
                 <div class="mt-4">
-                    <a href="/upload" class="btn btn-primary">Upload Image for Analysis</a>
+                    <a href="#" class="btn btn-primary" onclick="goToUpload()">Upload Image for Analysis</a>
+                    <script>
+                        function goToUpload() {
+                            // Stop the video stream by removing the <img> source
+                            document.querySelector('.video-feed').src = '';
+                            // Add a short delay to allow cleanup
+                            setTimeout(() => {
+                                window.location.href = '/upload';
+                            }, 300);
+                        }
+                        </script>
                 </div>
             </div>
         </div>
