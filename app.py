@@ -14,6 +14,16 @@ camera_lock = threading.Lock()
 model = None
 model_lock = threading.Lock()
 
+# GStreamer pipeline for camera (IMPORTANT: Choose one based on your camera type)
+# For CSI camera (e.g., Raspberry Pi Camera Module V2):
+# GSTREAMER_PIPELINE = "nvarguscamerasrc sensor_id=0 ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
+
+# For USB camera (replace /dev/video0 with your camera device if different):
+GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! video/x-raw, width=(int)640, height=(int)480, framerate=(fraction)30/1 ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
+
+# Default to None, user MUST uncomment and set one
+# GSTREAMER_PIPELINE = None # This line should now be commented out or removed
+
 # Load the model once at startup for efficiency
 MODEL_PATH = 'models/your_model.engine'
 
@@ -25,34 +35,41 @@ def get_camera():
     global camera
     with camera_lock:
         if camera is None:
+            print("Attempting to initialize camera...")
+            if GSTREAMER_PIPELINE is None:
+                print("ERROR: GSTREAMER_PIPELINE is not set. Please uncomment and configure it in app.py")
+                return None
+
             try:
-                # Try different camera backends
-                for backend in [cv2.CAP_ANY, cv2.CAP_V4L2, cv2.CAP_DSHOW]:
-                    try:
-                        print(f"Trying camera backend: {backend}")
-                        camera = cv2.VideoCapture(0, backend)
-                        if camera.isOpened():
-                            # Set camera properties
-                            camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                            camera.set(cv2.CAP_PROP_FPS, 30)
-                            # Try to read a test frame
-                            ret, frame = camera.read()
-                            if ret and frame is not None:
-                                print(f"Camera initialized successfully with backend {backend}")
-                                print(f"Frame size: {frame.shape}")
-                                return camera
-                            else:
-                                print(f"Failed to read test frame with backend {backend}")
-                                camera.release()
-                                camera = None
-                    except Exception as e:
-                        print(f"Error with backend {backend}: {e}")
-                        if camera is not None:
-                            camera.release()
-                            camera = None
+                print(f"Trying GStreamer pipeline: {GSTREAMER_PIPELINE}")
+                camera = cv2.VideoCapture(GSTREAMER_PIPELINE, cv2.CAP_GSTREAMER)
+                
+                if camera.isOpened():
+                    # Try to read several test frames to ensure stream is active
+                    test_frames_to_read = 10
+                    frames_read_successfully = 0
+                    for i in range(test_frames_to_read):
+                        ret, frame = camera.read()
+                        if ret and frame is not None:
+                            frames_read_successfully += 1
+                            print(f"Read test frame {i+1}/{test_frames_to_read} successfully. Frame shape: {frame.shape}")
+                            time.sleep(0.05) # Small delay to allow buffer to fill
+                        else:
+                            print(f"Failed to read test frame {i+1}/{test_frames_to_read}. Ret: {ret}, Frame is None: {frame is None}")
+                            
+                    if frames_read_successfully > 0: # At least one frame was read
+                        print(f"Camera initialized successfully using GStreamer pipeline. Read {frames_read_successfully} test frames.")
+                        return camera
+                    else:
+                        print("No test frames could be read with GStreamer pipeline. Releasing camera.")
+                        camera.release()
+                        camera = None
+                else:
+                    print("Camera not opened with GStreamer pipeline.")
+                    camera = None 
+
             except Exception as e:
-                print(f"Error initializing camera: {e}")
+                print(f"Error during GStreamer camera initialization: {e}")
                 if camera is not None:
                     camera.release()
                     camera = None
