@@ -90,16 +90,22 @@
             <div class="col-md-4">
                 <div class="mt-4">
                     <a href="#" class="btn btn-primary" onclick="goToUpload()">Upload Image for Analysis</a>
+
                     <script>
-                        function goToUpload() {
-                            // Stop the video stream by removing the <img> source
-                            document.querySelector('.video-feed').src = '';
-                            // Add a short delay to allow cleanup
-                            setTimeout(() => {
-                                window.location.href = '/upload';
-                            }, 300);
-                        }
-                        </script>
+                    function goToUpload() {
+                        const feed = document.querySelector('.video-feed');
+                    
+                        // Replace the stream with a dummy transparent pixel to end the video connection
+                        feed.onload = () => {
+                            console.log("Video feed fully unloaded");
+                            // Now that stream is unloaded, navigate to upload
+                            window.location.href = '/upload';
+                        };
+                    
+                        feed.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='; // 1x1 transparent gif
+                    }
+                    </script>
+                    
                 </div>
             </div>
         </div>
