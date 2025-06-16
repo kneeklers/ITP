@@ -19,10 +19,11 @@ model_lock = threading.Lock()
 # GSTREAMER_PIPELINE = "nvarguscamerasrc sensor_id=0 ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
 
 # For USB camera (replace /dev/video0 with your camera device if different):
-GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! video/x-raw, width=(int)640, height=(int)480, framerate=(fraction)30/1 ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
+# GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! video/x-raw, width=(int)640, height=(int)480, framerate=(fraction)30/1 ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
 
 # Default to None, user MUST uncomment and set one
 # GSTREAMER_PIPELINE = None # This line should now be commented out or removed
+GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! image/jpeg,width=640,height=480,framerate=30/1 ! jpegdec ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
 
 # Load the model once at startup for efficiency
 MODEL_PATH = 'models/your_model.engine'
@@ -41,27 +42,30 @@ def get_camera():
                 return None
 
             try:
-                print(f"Trying GStreamer pipeline: {GSTREAMER_PIPELINE}")
+                print(f"Opening camera with GStreamer pipeline: {GSTREAMER_PIPELINE}")
                 camera = cv2.VideoCapture(GSTREAMER_PIPELINE, cv2.CAP_GSTREAMER)
                 
                 if camera.isOpened():
+                    # No need to set properties like width, height, fps here, as they are defined in the GStreamer pipeline.
+                    # We'll just confirm it's opened and try to read a few frames.
+                    
                     # Try to read several test frames to ensure stream is active
-                    test_frames_to_read = 10
+                    test_frames_to_read = 5 # Reduced test frames for faster startup
                     frames_read_successfully = 0
                     for i in range(test_frames_to_read):
                         ret, frame = camera.read()
                         if ret and frame is not None:
                             frames_read_successfully += 1
-                            print(f"Read test frame {i+1}/{test_frames_to_read} successfully. Frame shape: {frame.shape}")
-                            time.sleep(0.05) # Small delay to allow buffer to fill
+                            # print(f"Read test frame {i+1}/{test_frames_to_read} successfully. Frame shape: {frame.shape}") # Keep this if more verbose logging is needed
+                            time.sleep(0.01) # Small delay to allow buffer to fill
                         else:
-                            print(f"Failed to read test frame {i+1}/{test_frames_to_read}. Ret: {ret}, Frame is None: {frame is None}")
+                            print(f"Failed to read test frame {i+1}/{test_frames_to_read} from GStreamer pipeline. Ret: {ret}, Frame is None: {frame is None}")
                             
-                    if frames_read_successfully > 0: # At least one frame was read
+                    if frames_read_successfully >= 3: # Require at least 3 successful frames to consider it stable
                         print(f"Camera initialized successfully using GStreamer pipeline. Read {frames_read_successfully} test frames.")
                         return camera
                     else:
-                        print("No test frames could be read with GStreamer pipeline. Releasing camera.")
+                        print("Not enough test frames could be read with GStreamer pipeline. Releasing camera.")
                         camera.release()
                         camera = None
                 else:
