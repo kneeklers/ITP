@@ -146,5 +146,15 @@
             }
         }, 5000);
     </script>
+    <script>
+        window.addEventListener('beforeunload', () => {
+            const feed = document.querySelector('.video-feed');
+            if (feed) {
+                // Replace video with dummy pixel so the backend can clean up camera safely
+                feed.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+            }
+        });
+        </script>
+        
 </body>
 </html> 
