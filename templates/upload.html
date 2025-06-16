@@ -7,6 +7,8 @@
         .container { margin-top: 50px; }
         .result-box { margin-top: 20px; }
         .preview-image { max-width: 100%; max-height: 400px; margin-top: 20px; }
+        .loading { display: none; }
+        .error-message { color: red; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -14,12 +16,18 @@
         <h1>Metal Sheet Defect Detection</h1>
         <div class="row">
             <div class="col-md-6">
-                <form action="/upload" method="post" enctype="multipart/form-data">
+                <form action="/upload" method="post" enctype="multipart/form-data" id="uploadForm">
                     <div class="mb-3">
                         <label for="image" class="form-label">Upload Image</label>
                         <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
                     </div>
-                    <button type="submit" class="btn btn-primary">Analyze Image</button>
+                    <button type="submit" class="btn btn-primary" id="submitBtn">Analyze Image</button>
+                    <div class="loading" id="loading">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <span class="ms-2">Processing image...</span>
+                    </div>
                 </form>
                 
                 <div id="preview" class="preview-image"></div>
@@ -29,10 +37,18 @@
                 <div class="result-box">
                     <h3>Detection Results</h3>
                     <div id="results">
+                        {% if error %}
+                        <div class="alert alert-danger">
+                            {{ error }}
+                        </div>
+                        {% endif %}
                         {% if result %}
                         <div class="alert alert-info">
                             <h4>Defect Type: {{ result.defect_type }}</h4>
                             <p>Confidence: {{ result.confidence }}%</p>
+                            {% if result.result_image %}
+                            <img src="{{ url_for('static', filename='results/' + result.result_image) }}" class="img-fluid mt-3">
+                            {% endif %}
                         </div>
                         {% endif %}
                     </div>
@@ -57,6 +73,12 @@
                 }
                 reader.readAsDataURL(file);
             }
+        });
+
+        // Show loading state during form submission
+        document.getElementById('uploadForm').addEventListener('submit', function() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('submitBtn').disabled = true;
         });
     </script>
 </body>

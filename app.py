@@ -90,16 +90,47 @@ def index():
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_page():
     if request.method == 'POST':
-        if 'image' not in request.files or request.files['image'].filename == '':
-            return render_template('upload.html', result=None)
-        file = request.files['image']
-        filename = os.path.join('uploads', file.filename)
-        os.makedirs('uploads', exist_ok=True) # Ensure uploads dir exists
-        file.save(filename)
-        result = process_image(filename) # NOTE: process_image should be commented out or simplified for this test
-        os.remove(filename)
-        return render_template('upload.html', result=result)
-    # Original GET request handling
+        try:
+            if 'image' not in request.files:
+                print("No image file in request")
+                return render_template('upload.html', result=None, error="No image file selected")
+            
+            file = request.files['image']
+            if file.filename == '':
+                print("No selected file")
+                return render_template('upload.html', result=None, error="No file selected")
+            
+            if not file:
+                print("Invalid file")
+                return render_template('upload.html', result=None, error="Invalid file")
+            
+            # Create uploads directory if it doesn't exist
+            os.makedirs('uploads', exist_ok=True)
+            
+            # Save the file
+            filename = os.path.join('uploads', file.filename)
+            file.save(filename)
+            print(f"File saved to {filename}")
+            
+            # Process the image
+            result = process_image(filename)
+            print(f"Processing result: {result}")
+            
+            # Clean up
+            try:
+                os.remove(filename)
+            except Exception as e:
+                print(f"Error removing file: {e}")
+            
+            if result is None:
+                return render_template('upload.html', result=None, error="Error processing image")
+            
+            return render_template('upload.html', result=result)
+            
+        except Exception as e:
+            print(f"Error in upload route: {str(e)}")
+            return render_template('upload.html', result=None, error=f"Error: {str(e)}")
+    
     return render_template('upload.html', result=None)
 
 @app.route('/video_feed')
