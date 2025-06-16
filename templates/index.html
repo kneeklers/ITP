@@ -92,19 +92,19 @@
                     <a href="#" class="btn btn-primary" onclick="goToUpload()">Upload Image for Analysis</a>
 
                     <script>
-                    function goToUpload() {
-                        const feed = document.querySelector('.video-feed');
-                    
-                        // Replace the stream with a dummy transparent pixel to end the video connection
-                        feed.onload = () => {
-                            console.log("Video feed fully unloaded");
-                            // Now that stream is unloaded, navigate to upload
-                            window.location.href = '/upload';
-                        };
-                    
-                        feed.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=='; // 1x1 transparent gif
-                    }
-                    </script>
+                        function goToUpload() {
+                            const feed = document.querySelector('.video-feed');
+                        
+                            // Stop streaming by replacing the video with a transparent 1x1 gif
+                            feed.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+                        
+                            // Fallback: force redirect after 400ms in case onload doesn't fire
+                            setTimeout(() => {
+                                window.location.href = '/upload';
+                            }, 400);
+                        }
+                        </script>
+                        
                     
                 </div>
             </div>
