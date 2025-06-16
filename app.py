@@ -30,6 +30,10 @@ def get_camera():
                 if not camera.isOpened():
                     print("Failed to open camera")
                     return None
+                # Set camera properties
+                camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                print("Camera initialized successfully")
             except Exception as e:
                 print(f"Error initializing camera: {e}")
                 return None
@@ -125,89 +129,128 @@ def process_image(image_path):
 
 def generate_frames():
     while True:
-        with camera_lock:
-            camera = get_camera()
-            success, frame = camera.read()
-            if not success:
-                break
-            else:
+        try:
+            with camera_lock:
+                camera = get_camera()
+                if camera is None:
+                    print("Camera not available")
+                    break
+                
+                success, frame = camera.read()
+                if not success:
+                    print("Failed to read frame")
+                    break
+                
+                # Process frame if needed
                 processed_frame = detect_defects(frame)
+                
+                # Encode frame
                 ret, buffer = cv2.imencode('.jpg', processed_frame)
+                if not ret:
+                    print("Failed to encode frame")
+                    break
+                
                 frame = buffer.tobytes()
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-        time.sleep(0.1)
+            
+            time.sleep(0.1)  # Add small delay to prevent high CPU usage
+            
+        except Exception as e:
+            print(f"Error in generate_frames: {e}")
+            break
+    
+    # Clean up if loop breaks
+    release_camera()
 
 @app.route('/')
 def index():
-    # Release model when switching to live stream
-    release_model()
-    # Ensure camera is initialized
-    camera = get_camera()
-    if camera is None:
-        return "Error: Could not initialize camera", 500
-    return render_template('index.html')
-
-@app.route('/upload', methods=['GET', 'POST'])
-def upload_page():
-    # Release camera and ensure model is released before switching to upload page
-    release_camera()
-    release_model()  # Ensure model is released before processing
-    
-    if request.method == 'POST':
-        try:
-            if 'image' not in request.files:
-                print("No image file in request")
-                return render_template('upload.html', result=None, error="No image file selected")
-            
-            file = request.files['image']
-            if file.filename == '':
-                print("No selected file")
-                return render_template('upload.html', result=None, error="No file selected")
-            
-            if not file:
-                print("Invalid file")
-                return render_template('upload.html', result=None, error="Invalid file")
-            
-            # Create uploads directory if it doesn't exist
-            os.makedirs('uploads', exist_ok=True)
-            
-            # Save the file
-            filename = os.path.join('uploads', file.filename)
-            file.save(filename)
-            print(f"File saved to {filename}")
-            
-            # Process the image
-            result = process_image(filename)
-            print(f"Processing result: {result}")
-            
-            # Clean up
-            try:
-                os.remove(filename)
-            except Exception as e:
-                print(f"Error removing file: {e}")
-            
-            if result is None:
-                return render_template('upload.html', result=None, error="Error processing image")
-            
-            return render_template('upload.html', result=result)
-            
-        except Exception as e:
-            print(f"Error in upload route: {str(e)}")
-            return render_template('upload.html', result=None, error=f"Error: {str(e)}")
-    
-    return render_template('upload.html', result=None)
+    try:
+        # Release model when switching to live stream
+        release_model()
+        
+        # Initialize camera
+        camera = get_camera()
+        if camera is None:
+            return "Error: Could not initialize camera", 500
+        
+        return render_template('index.html')
+    except Exception as e:
+        print(f"Error in index route: {e}")
+        return "Error initializing camera", 500
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    try:
+        return Response(generate_frames(),
+                       mimetype='multipart/x-mixed-replace; boundary=frame')
+    except Exception as e:
+        print(f"Error in video_feed route: {e}")
+        return "Error streaming video", 500
+
+@app.route('/upload', methods=['GET', 'POST'])
+def upload_page():
+    try:
+        # Release camera and ensure model is released before switching to upload page
+        release_camera()
+        release_model()  # Ensure model is released before processing
+        
+        if request.method == 'POST':
+            try:
+                if 'image' not in request.files:
+                    print("No image file in request")
+                    return render_template('upload.html', result=None, error="No image file selected")
+                
+                file = request.files['image']
+                if file.filename == '':
+                    print("No selected file")
+                    return render_template('upload.html', result=None, error="No file selected")
+                
+                if not file:
+                    print("Invalid file")
+                    return render_template('upload.html', result=None, error="Invalid file")
+                
+                # Create uploads directory if it doesn't exist
+                os.makedirs('uploads', exist_ok=True)
+                
+                # Save the file
+                filename = os.path.join('uploads', file.filename)
+                file.save(filename)
+                print(f"File saved to {filename}")
+                
+                # Process the image
+                result = process_image(filename)
+                print(f"Processing result: {result}")
+                
+                # Clean up
+                try:
+                    os.remove(filename)
+                except Exception as e:
+                    print(f"Error removing file: {e}")
+                
+                if result is None:
+                    return render_template('upload.html', result=None, error="Error processing image")
+                
+                return render_template('upload.html', result=result)
+                
+            except Exception as e:
+                print(f"Error in upload POST: {str(e)}")
+                return render_template('upload.html', result=None, error=f"Error: {str(e)}")
+        
+        return render_template('upload.html', result=None)
+    except Exception as e:
+        print(f"Error in upload route: {e}")
+        return "Error loading upload page", 500
 
 @app.route('/shutdown')
 def shutdown():
-    release_camera()
-    release_model()
-    return "Resources released"
+    try:
+        release_camera()
+        release_model()
+        return "Resources released"
+    except Exception as e:
+        print(f"Error in shutdown: {e}")
+        return "Error releasing resources", 500
 
 if __name__ == '__main__':
     try:
