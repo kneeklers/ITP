@@ -9,6 +9,7 @@ class TensorRTInference:
     def __init__(self, engine_path):
         # Initialize CUDA context
         self.cuda_ctx = cuda.Device(0).make_context()
+        print("TensorRTInference: CUDA context created.")
         
         # Load TensorRT engine
         self.logger = trt.Logger(trt.Logger.WARNING)
@@ -19,6 +20,7 @@ class TensorRTInference:
             raise RuntimeError(f"Failed to load engine from {engine_path}")
         
         self.context = self.engine.create_execution_context()
+        print("TensorRTInference: Engine and execution context created.")
         
         # Allocate GPU memory for inputs and outputs
         self.allocate_buffers()
@@ -39,6 +41,7 @@ class TensorRTInference:
         
         # Default class names (modify for your custom classes)
         self.class_names = self._get_default_class_names()
+        print("TensorRTInference: Initialization complete.")
     
     def allocate_buffers(self):
         """Allocate GPU memory for inputs and outputs"""
@@ -266,8 +269,53 @@ class TensorRTInference:
         return result_image, boxes, scores, class_ids
     
     def __del__(self):
+        self.destroy()
+
+    def destroy(self):
+        """Explicitly destroy the TensorRT engine and CUDA context."""
+        print("TensorRTInference: Destroying resources...")
         try:
-            if hasattr(self, 'cuda_ctx'):
-                self.cuda_ctx.pop()
-        except:
-            pass
+            if hasattr(self, 'context') and self.context:
+                del self.context
+                self.context = None
+                print("TensorRTInference: Execution context destroyed.")
+            if hasattr(self, 'engine') and self.engine:
+                del self.engine
+                self.engine = None
+                print("TensorRTInference: Engine destroyed.")
+            if hasattr(self, 'stream') and self.stream:
+                del self.stream
+                self.stream = None
+                print("TensorRTInference: CUDA stream destroyed.")
+            
+            # Free allocated buffers
+            for inp in self.inputs:
+                if 'device' in inp and inp['device']:
+                    cuda.mem_free(inp['device'])
+                if 'host' in inp and inp['host'] is not None:
+                    del inp['host']
+            for out in self.outputs:
+                if 'device' in out and out['device']:
+                    cuda.mem_free(out['device'])
+                if 'host' in out and out['host'] is not None:
+                    del out['host']
+            self.inputs = []
+            self.outputs = []
+            self.bindings = []
+            print("TensorRTInference: Buffers freed.")
+
+            # Pop the CUDA context last
+            if hasattr(self, 'cuda_ctx') and self.cuda_ctx:
+                # Only pop if it's the current context
+                current_ctx = cuda.Context.get_current()
+                if current_ctx == self.cuda_ctx:
+                    self.cuda_ctx.pop()
+                    print("TensorRTInference: CUDA context popped.")
+                else:
+                    print("TensorRTInference: CUDA context not current, skipping pop.")
+                # Ensure the reference is cleared
+                del self.cuda_ctx
+                self.cuda_ctx = None
+            print("TensorRTInference: Resources destruction complete.")
+        except Exception as e:
+            print(f"TensorRTInference: Error during resource destruction: {e}")

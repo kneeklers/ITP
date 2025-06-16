@@ -116,9 +116,11 @@ class CameraStream:
             self.running = False
             if self.thread and self.thread.is_alive():
                 print("CameraStream: Waiting for thread to finish...")
-                self.thread.join(timeout=3) # Increased timeout
+                self.thread.join(timeout=5) # Increased timeout for robustness
                 if self.thread.is_alive():
                     print("CameraStream: Warning! Thread did not terminate gracefully within timeout.")
+                else:
+                    print("CameraStream: Thread terminated successfully.")
             self.thread = None
             print("CameraStream thread stopped.")
 
@@ -175,7 +177,7 @@ def release_camera():
     if camera_stream_running:
         print("release_camera: Stopping CameraStream thread.")
         camera_manager.stop()
-        # Optionally, clear latest_frame if no stream is expected
+        # Clear latest_frame to prevent stale data and ensure resource release
         global latest_frame
         with latest_frame_lock:
             latest_frame = None
@@ -206,18 +208,13 @@ def release_model():
     with model_lock:
         if model is not None:
             try:
-                # Clean up CUDA context
-                try:
-                    import pycuda.driver as cuda
-                    cuda.Context.pop()
-                except:
-                    pass
-                
-                del model
+                print("release_model: Attempting to destroy model resources.")
+                model.destroy() # Explicitly call the destroy method
                 model = None
-                print("Model released successfully")
+                print("release_model: Model released successfully.")
             except Exception as e:
-                print(f"Error releasing model: {e}")
+                print(f"release_model: Error destroying or releasing model: {e}")
+                model = None # Ensure model is cleared even if destroy fails partially
 
 def detect_defects(frame):
     # For now, just return the original frame
@@ -331,6 +328,7 @@ def upload_page():
     try:
         print("Accessing upload page")
         camera_manager.stop() # Stop camera stream for upload
+        time.sleep(0.75) # Add a short delay to allow camera resources to fully release
         release_model() # Ensure model is released before processing
 
         if request.method == 'POST':
