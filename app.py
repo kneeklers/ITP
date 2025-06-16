@@ -23,22 +23,42 @@ os.makedirs('static/results', exist_ok=True)
 
 def get_camera():
     global camera
-    if camera is None:
-        camera = cv2.VideoCapture(0)
+    with camera_lock:
+        if camera is None:
+            try:
+                camera = cv2.VideoCapture(0)
+                if not camera.isOpened():
+                    print("Failed to open camera")
+                    return None
+            except Exception as e:
+                print(f"Error initializing camera: {e}")
+                return None
     return camera
 
 def release_camera():
     global camera
-    if camera is not None:
-        camera.release()
-        camera = None
+    with camera_lock:
+        if camera is not None:
+            try:
+                camera.release()
+                camera = None
+            except Exception as e:
+                print(f"Error releasing camera: {e}")
 
 def get_model():
     global model
     with model_lock:
         if model is None:
             try:
+                # Ensure any existing CUDA context is cleaned up
+                try:
+                    import pycuda.driver as cuda
+                    cuda.Context.pop()
+                except:
+                    pass
+                
                 model = TensorRTInference(MODEL_PATH)
+                print("Model initialized successfully")
             except Exception as e:
                 print(f"Error initializing model: {e}")
                 return None
@@ -49,8 +69,16 @@ def release_model():
     with model_lock:
         if model is not None:
             try:
+                # Clean up CUDA context
+                try:
+                    import pycuda.driver as cuda
+                    cuda.Context.pop()
+                except:
+                    pass
+                
                 del model
                 model = None
+                print("Model released successfully")
             except Exception as e:
                 print(f"Error releasing model: {e}")
 
@@ -114,12 +142,17 @@ def generate_frames():
 def index():
     # Release model when switching to live stream
     release_model()
+    # Ensure camera is initialized
+    camera = get_camera()
+    if camera is None:
+        return "Error: Could not initialize camera", 500
     return render_template('index.html')
 
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_page():
-    # Release camera when switching to upload page
+    # Release camera and ensure model is released before switching to upload page
     release_camera()
+    release_model()  # Ensure model is released before processing
     
     if request.method == 'POST':
         try:
@@ -178,6 +211,9 @@ def shutdown():
 
 if __name__ == '__main__':
     try:
+        # Ensure clean state at startup
+        release_camera()
+        release_model()
         app.run(host='0.0.0.0', port=5000, debug=True, threaded=False)
     finally:
         release_camera()
