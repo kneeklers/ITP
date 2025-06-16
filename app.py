@@ -15,8 +15,8 @@ camera_lock = threading.Lock() # Still used by _get_camera_instance for thread-s
 model = None
 model_lock = threading.Lock()
 
-# GStreamer pipeline for camera
-GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! video/x-raw, format=YUY2, width=640, height=480, framerate=30/1 ! videoconvert ! video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1 wait-on-eos=false"
+# GStreamer pipeline for camera - Now explicitly defined with queue properties
+GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! image/jpeg,width=640,height=480,framerate=30/1 ! jpegdec ! videoconvert ! video/x-raw, format=BGR ! queue leaky=downstream max-size-buffers=1 ! appsink drop=true sync=false wait-on-eos=false"
 
 # Load the model once at startup for efficiency
 MODEL_PATH = 'models/your_model.engine'
@@ -35,7 +35,6 @@ class CameraStream:
         self._camera_instance = None # Private instance of VideoCapture
         self.running = False
         self._stop_event = threading.Event() # Event to signal thread to stop
-        self._reading_allowed = threading.Event() # Event to control if read() is attempted
         self.thread = None
         self.lock = threading.Lock() # For protecting internal state of CameraStream
 
@@ -48,8 +47,6 @@ class CameraStream:
 
             self.running = True
             self._stop_event.clear() # Clear the stop event
-            self._reading_allowed.set() # Allow reading when starting
-            camera_stream_running = True
             self.thread = threading.Thread(target=self._update, args=())
             self.thread.daemon = True # Daemon threads exit when the main program exits
             self.thread.start()
@@ -60,24 +57,21 @@ class CameraStream:
         global camera_stream_running
 
         print("CameraStream._update: Thread started, acquiring camera...")
-        # Ensure any existing CUDA context on this thread is popped before acquiring new camera
         try:
             current_ctx_on_thread = cuda.Context.get_current()
             if current_ctx_on_thread:
                 current_ctx_on_thread.pop()
                 print("CameraStream._update: Popped existing CUDA context on thread before camera acquisition.")
         except cuda.LogicError:
-            pass # No context was current
+            pass
         except Exception as e:
             print(f"CameraStream._update: Error popping CUDA context on thread startup: {e}")
 
-        # Acquire a new camera instance for this thread
         self._camera_instance = _get_camera_instance()
         if self._camera_instance is None:
             print("CameraStream._update: Failed to acquire camera, thread stopping.")
             self.running = False
             camera_stream_running = False
-            # Ensure context is popped if creation failed after a partial context push
             try:
                 current_ctx_on_thread = cuda.Context.get_current()
                 if current_ctx_on_thread:
@@ -90,79 +84,49 @@ class CameraStream:
 
         frame_read_count = 0
         consecutive_read_failures = 0
-        max_read_failures = 10 # Allow more failures before full reinit
+        max_read_failures = 10
 
-        while self.running and not self._stop_event.is_set(): # Check stop event
-            print(f"CameraStream._update: Loop check - running={self.running}, stop_event={self._stop_event.is_set()}") # DIAGNOSTIC PRINT
-            # Prioritize stopping if signal is received
+        while self.running:
+            # Prioritize stopping immediately if stop event is set
             if self._stop_event.is_set():
-                print("CameraStream._update: Stop event set. Releasing camera and exiting loop.")
-                if self._camera_instance:
-                    self._camera_instance.release()
-                    self._camera_instance = None # Clear instance
-                break # Exit the loop
+                print("CameraStream._update: Stop event set. Exiting loop immediately.")
+                break
 
-            # Add a small sleep here BEFORE attempting to read, to allow stop signal to be processed
-            time.sleep(0.05) # Yield control, allows _stop_event to be picked up
+            # If camera instance becomes None (due to forceful release from stop()), exit
+            if self._camera_instance is None:
+                print("CameraStream._update: Camera instance is None. Exiting loop.")
+                break
 
-            # Check if reading is allowed before attempting read()
-            if not self._reading_allowed.is_set():
-                print("CameraStream._update: Reading not allowed. Waiting for permission or stop signal.")
-                time.sleep(0.1) # Wait briefly before re-checking
-                continue
-
-            # Check if camera is still open before trying to read
+            # If camera is no longer open, exit
             if not self._camera_instance.isOpened():
-                print("CameraStream._update: Camera instance is not open. Attempting reinitialization...")
-                # If camera is no longer open, it means it was released externally or failed.
-                # In this case, we should try to exit or reinitialize.
-                if self._stop_event.is_set():
-                    print("CameraStream._update: Stop event set and camera not open. Exiting loop.")
-                    break # Exit gracefully if stop signal received and camera is closed
+                print("CameraStream._update: Camera is no longer open. Exiting loop.")
+                break
 
-                self._camera_instance = _get_camera_instance()
-                if self._camera_instance is None:
-                    print("CameraStream._update: Reinitialization failed, thread stopping.")
-                    self.running = False
-                    camera_stream_running = False
-                    break
-                time.sleep(0.5)
-                continue
+            # Add a very small sleep here to yield control, but not too much to affect FPS
+            time.sleep(0.001) # This small sleep is crucial for responsiveness to stop signals
 
-            # print("CameraStream._update: Attempting to read frame...") # Uncomment for extreme verbosity
+            print("CameraStream._update: Attempting to read frame...") # New diagnostic print
             ret, frame = self._camera_instance.read()
-            # print(f"CameraStream._update: Read result: ret={ret}, frame is None={frame is None}") # Uncomment for extreme verbosity
+            print(f"CameraStream._update: Read result: ret={ret}, frame is None={frame is None}") # New diagnostic print
+
+            # Check stop event immediately after read returns
+            if self._stop_event.is_set():
+                print("CameraStream._update: Stop event set after reading frame. Exiting loop.")
+                break
 
             if not ret or frame is None:
                 consecutive_read_failures += 1
                 print(f"CameraStream._update: Failed to read frame ({consecutive_read_failures}/{max_read_failures}). Ret: {ret}, Frame is None: {frame is None}")
                 if consecutive_read_failures >= max_read_failures:
-                    print("CameraStream._update: Max consecutive frame read failures reached. Releasing and re-acquiring camera.")
-                    if self._camera_instance:
-                        self._camera_instance.release()
-                    # Pop context before re-acquisition attempt
-                    try:
-                        current_ctx_on_thread = cuda.Context.get_current()
-                        if current_ctx_on_thread:
-                            current_ctx_on_thread.pop()
-                            print("CameraStream._update: Popped CUDA context before re-acquiring camera.")
-                    except cuda.LogicError:
-                        pass # No context was current
-                    except Exception as e:
-                        print(f"CameraStream._update: Error popping CUDA context during re-acquisition: {e}")
-
-                    self._camera_instance = _get_camera_instance() # Re-acquire camera
-                    if self._camera_instance is None:
-                        print("CameraStream._update: Re-acquisition failed, thread stopping.")
-                        self.running = False
-                        camera_stream_running = False
-                        break
-                    consecutive_read_failures = 0 # Reset failures on successful re-acquisition
-                    time.sleep(0.5) # Small delay after re-acquisition
-                time.sleep(0.05) # Small delay on read failure to prevent busy-waiting
+                    print("CameraStream._update: Max consecutive frame read failures reached. Terminating thread.")
+                    # Force thread to exit if camera is consistently failing
+                    self.running = False
+                    camera_stream_running = False
+                    break # Break the while loop to exit the thread
+                time.sleep(0.05)
                 continue
 
-            consecutive_read_failures = 0  # Reset on successful frame read
+            consecutive_read_failures = 0
             frame_read_count += 1
             if frame_read_count % 100 == 0:
                 print(f"CameraStream._update: Successfully read {frame_read_count} frames.")
@@ -170,23 +134,22 @@ class CameraStream:
             with latest_frame_lock:
                 latest_frame = frame.copy()
 
-            time.sleep(0.01) # Small delay to control CPU usage
+            time.sleep(0.01)
 
-        print("CameraStream._update: Thread stopping. Releasing camera instance.")
+        print("CameraStream._update: Thread stopping. Releasing camera instance (if still held).")
         if self._camera_instance:
             self._camera_instance.release()
         self._camera_instance = None
         self.running = False
         camera_stream_running = False
         
-        # Ensure CUDA context is popped when thread exits
         try:
             current_ctx_on_thread = cuda.Context.get_current()
             if current_ctx_on_thread:
                 current_ctx_on_thread.pop()
                 print("CameraStream._update: Popped CUDA context on thread exit.")
         except cuda.LogicError:
-            pass # No context was current
+            pass
         except Exception as e:
             print(f"CameraStream._update: Error popping CUDA context on thread exit: {e}")
 
@@ -195,19 +158,36 @@ class CameraStream:
             if not self.running:
                 print("CameraStream: Not running.")
                 return
-            self._reading_allowed.clear() # Signal to stop reading
-            self._stop_event.set() # Set the stop event
+            
+            print("CameraStream: Signalling thread to stop...")
+            self._stop_event.set() # Set the stop event first
             self.running = False # Also set this flag for consistency
+            
+            # Attempt to release camera instance here to unblock read() from main thread
+            if self._camera_instance and self._camera_instance.isOpened():
+                print("CameraStream: Forcefully releasing internal camera instance from stop() method to unblock thread.")
+                self._camera_instance.release()
+                self._camera_instance = None # Explicitly set to None here
+                print("CameraStream: Internal camera instance release attempted and set to None.")
+
+            # --- Aggressive Camera Reset Attempt (New) ---
+            print("CameraStream.stop: Attempting aggressive camera reset...")
+            try:
+                temp_camera = _get_camera_instance()
+                if temp_camera:
+                    print("CameraStream.stop: Successfully acquired temp camera instance for reset. Releasing it.")
+                    temp_camera.release()
+                else:
+                    print("CameraStream.stop: Failed to acquire temp camera instance for reset (might be good if already released).")
+            except Exception as e:
+                print(f"CameraStream.stop: Error during aggressive camera reset: {e}")
+            # ----------------------------------------------
+
             if self.thread and self.thread.is_alive():
-                print("CameraStream: Waiting for thread to finish...")
-                self.thread.join(timeout=5) # Increased timeout for robustness
+                print("CameraStream: Waiting for thread to finish (join timeout=5s)...")
+                self.thread.join(timeout=5)
                 if self.thread.is_alive():
-                    print("CameraStream: Warning! Thread did not terminate gracefully within timeout. Attempting forceful release.")
-                    # Forcefully release the camera instance if thread is stuck
-                    if self._camera_instance and self._camera_instance.isOpened():
-                        self._camera_instance.release()
-                        self._camera_instance = None
-                        print("CameraStream: Forcefully released internal camera instance.")
+                    print("CameraStream: Warning! Thread did not terminate gracefully within timeout. It might be stuck.")
                 else:
                     print("CameraStream: Thread terminated successfully.")
             self.thread = None
@@ -218,19 +198,18 @@ camera_manager = CameraStream()
 
 # Renamed get_camera to _get_camera_instance to emphasize it returns a new instance
 def _get_camera_instance():
-    # This function now exclusively focuses on creating and testing a new VideoCapture instance.
-    # It does not manage a global 'camera' variable.
     with camera_lock: # Still use the lock to prevent multiple threads from initializing cameras concurrently
-        print("Attempting to create and test a new camera instance...")
-        if GSTREAMER_PIPELINE is None:
-            print("ERROR: GSTREAMER_PIPELINE is not set. Please uncomment and configure it in app.py")
-            return None
+        print("Attempting to create and test a new camera instance (using GStreamer pipeline)...")
+        
+        # Re-introduce the specific GStreamer pipeline
+        gstreamer_pipeline_string = "v4l2src device=/dev/video0 ! image/jpeg,width=640,height=480,framerate=30/1 ! jpegdec ! videoconvert ! video/x-raw, format=BGR ! queue leaky=downstream max-size-buffers=1 ! appsink drop=true sync=false wait-on-eos=false"
 
         try:
-            print(f"Opening camera with GStreamer pipeline: {GSTREAMER_PIPELINE}")
-            cam_instance = cv2.VideoCapture(GSTREAMER_PIPELINE, cv2.CAP_GSTREAMER)
+            print(f"Opening camera with GStreamer pipeline: {gstreamer_pipeline_string}")
+            cam_instance = cv2.VideoCapture(gstreamer_pipeline_string, cv2.CAP_GSTREAMER)
 
             if cam_instance.isOpened():
+                # No need to set properties explicitly, as they are in the GStreamer pipeline.
                 test_frames_to_read = 5
                 frames_read_successfully = 0
                 for i in range(test_frames_to_read):
@@ -242,10 +221,10 @@ def _get_camera_instance():
                         print(f"Failed to read test frame {i+1}/{test_frames_to_read} from GStreamer pipeline. Ret: {ret}, Frame is None: {frame is None}")
 
                 if frames_read_successfully >= 3:
-                    print(f"Camera instance successfully created and tested. Read {frames_read_successfully} test frames.")
-                    return cam_instance # Return the newly created and tested instance
+                    print(f"Camera instance successfully created and tested with GStreamer pipeline. Read {frames_read_successfully} test frames.")
+                    return cam_instance
                 else:
-                    print("Not enough test frames could be read. Releasing new camera instance.")
+                    print("Not enough test frames could be read with GStreamer pipeline. Releasing new camera instance.")
                     cam_instance.release()
                     return None
             else:
@@ -254,19 +233,15 @@ def _get_camera_instance():
 
         except Exception as e:
             print(f"Error during GStreamer camera instance creation: {e}")
-            # Ensure the instance is released if an error occurs during its creation
             if 'cam_instance' in locals() and cam_instance.isOpened():
                 cam_instance.release()
             return None
 
 def release_camera():
-    # This function now primarily stops the CameraStream thread.
-    # The CameraStream thread is responsible for releasing its own VideoCapture instance.
     global camera_stream_running
     if camera_stream_running:
         print("release_camera: Stopping CameraStream thread. This will trigger internal camera release.")
         camera_manager.stop()
-        # Clear latest_frame to prevent stale data and ensure resource release
         global latest_frame
         with latest_frame_lock:
             latest_frame = None
@@ -415,7 +390,8 @@ def video_feed():
 def upload_page():
     try:
         print("Accessing upload page")
-        camera_manager.stop() # Stop camera stream for upload
+        # Stop camera stream FIRST, then release model
+        release_camera() # This will now aggressively stop the CameraStream thread
         time.sleep(0.75) # Add a short delay to allow camera resources to fully release
         release_model() # Ensure model is released before processing
 
