@@ -5,6 +5,7 @@ import threading
 import time
 import os
 from trt_infer import TensorRTInference
+import pycuda.driver as cuda
 
 app = Flask(__name__)
 
@@ -33,6 +34,8 @@ class CameraStream:
     def __init__(self):
         self._camera_instance = None # Private instance of VideoCapture
         self.running = False
+        self._stop_event = threading.Event() # Event to signal thread to stop
+        self._reading_allowed = threading.Event() # Event to control if read() is attempted
         self.thread = None
         self.lock = threading.Lock() # For protecting internal state of CameraStream
 
@@ -44,6 +47,8 @@ class CameraStream:
                 return
 
             self.running = True
+            self._stop_event.clear() # Clear the stop event
+            self._reading_allowed.set() # Allow reading when starting
             camera_stream_running = True
             self.thread = threading.Thread(target=self._update, args=())
             self.thread.daemon = True # Daemon threads exit when the main program exits
@@ -53,12 +58,10 @@ class CameraStream:
     def _update(self):
         global latest_frame
         global camera_stream_running
-        import pycuda.driver as cuda
 
         print("CameraStream._update: Thread started, acquiring camera...")
         # Ensure any existing CUDA context on this thread is popped before acquiring new camera
         try:
-            # Pop current context if one exists on this thread
             current_ctx_on_thread = cuda.Context.get_current()
             if current_ctx_on_thread:
                 current_ctx_on_thread.pop()
@@ -89,7 +92,43 @@ class CameraStream:
         consecutive_read_failures = 0
         max_read_failures = 10 # Allow more failures before full reinit
 
-        while self.running:
+        while self.running and not self._stop_event.is_set(): # Check stop event
+            print(f"CameraStream._update: Loop check - running={self.running}, stop_event={self._stop_event.is_set()}") # DIAGNOSTIC PRINT
+            # Prioritize stopping if signal is received
+            if self._stop_event.is_set():
+                print("CameraStream._update: Stop event set. Releasing camera and exiting loop.")
+                if self._camera_instance:
+                    self._camera_instance.release()
+                    self._camera_instance = None # Clear instance
+                break # Exit the loop
+
+            # Add a small sleep here BEFORE attempting to read, to allow stop signal to be processed
+            time.sleep(0.05) # Yield control, allows _stop_event to be picked up
+
+            # Check if reading is allowed before attempting read()
+            if not self._reading_allowed.is_set():
+                print("CameraStream._update: Reading not allowed. Waiting for permission or stop signal.")
+                time.sleep(0.1) # Wait briefly before re-checking
+                continue
+
+            # Check if camera is still open before trying to read
+            if not self._camera_instance.isOpened():
+                print("CameraStream._update: Camera instance is not open. Attempting reinitialization...")
+                # If camera is no longer open, it means it was released externally or failed.
+                # In this case, we should try to exit or reinitialize.
+                if self._stop_event.is_set():
+                    print("CameraStream._update: Stop event set and camera not open. Exiting loop.")
+                    break # Exit gracefully if stop signal received and camera is closed
+
+                self._camera_instance = _get_camera_instance()
+                if self._camera_instance is None:
+                    print("CameraStream._update: Reinitialization failed, thread stopping.")
+                    self.running = False
+                    camera_stream_running = False
+                    break
+                time.sleep(0.5)
+                continue
+
             # print("CameraStream._update: Attempting to read frame...") # Uncomment for extreme verbosity
             ret, frame = self._camera_instance.read()
             # print(f"CameraStream._update: Read result: ret={ret}, frame is None={frame is None}") # Uncomment for extreme verbosity
@@ -156,12 +195,19 @@ class CameraStream:
             if not self.running:
                 print("CameraStream: Not running.")
                 return
-            self.running = False
+            self._reading_allowed.clear() # Signal to stop reading
+            self._stop_event.set() # Set the stop event
+            self.running = False # Also set this flag for consistency
             if self.thread and self.thread.is_alive():
                 print("CameraStream: Waiting for thread to finish...")
                 self.thread.join(timeout=5) # Increased timeout for robustness
                 if self.thread.is_alive():
-                    print("CameraStream: Warning! Thread did not terminate gracefully within timeout.")
+                    print("CameraStream: Warning! Thread did not terminate gracefully within timeout. Attempting forceful release.")
+                    # Forcefully release the camera instance if thread is stuck
+                    if self._camera_instance and self._camera_instance.isOpened():
+                        self._camera_instance.release()
+                        self._camera_instance = None
+                        print("CameraStream: Forcefully released internal camera instance.")
                 else:
                     print("CameraStream: Thread terminated successfully.")
             self.thread = None
@@ -218,7 +264,7 @@ def release_camera():
     # The CameraStream thread is responsible for releasing its own VideoCapture instance.
     global camera_stream_running
     if camera_stream_running:
-        print("release_camera: Stopping CameraStream thread.")
+        print("release_camera: Stopping CameraStream thread. This will trigger internal camera release.")
         camera_manager.stop()
         # Clear latest_frame to prevent stale data and ensure resource release
         global latest_frame
@@ -234,7 +280,6 @@ def get_model():
             try:
                 # Ensure any existing CUDA context is cleaned up
                 try:
-                    import pycuda.driver as cuda
                     cuda.Context.pop()
                 except:
                     pass
