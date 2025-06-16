@@ -23,7 +23,7 @@ model_lock = threading.Lock()
 
 # Default to None, user MUST uncomment and set one
 # GSTREAMER_PIPELINE = None # This line should now be commented out or removed
-GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! image/jpeg,width=640,height=480,framerate=30/1 ! jpegdec ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
+GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! image/jpeg,width=640,height=480,framerate=30/1 ! jpegdec ! videoconvert ! video/x-raw, format=(string)BGR ! appsink drop=true sync=false"
 
 # Load the model once at startup for efficiency
 MODEL_PATH = 'models/your_model.engine'
@@ -174,42 +174,49 @@ def generate_frames():
     consecutive_failures = 0
     max_failures = 5
     
-    print("Starting frame generation")
+    print("Starting frame generation loop...")
     
     while True:
         try:
+            # Ensure camera is acquired within the lock to prevent race conditions
             with camera_lock:
                 camera = get_camera()
                 if camera is None:
-                    print("Camera not available in generate_frames")
-                    time.sleep(1)  # Wait before retrying
+                    print("generate_frames: Camera not available, retrying...")
+                    time.sleep(1)  # Wait before retrying camera acquisition
+                    consecutive_failures += 1 # Treat as a failure to get camera
+                    if consecutive_failures >= max_failures:
+                        print("generate_frames: Max consecutive camera failures reached. Exiting stream.")
+                        break
                     continue
                 
-                success, frame = camera.read()
-                if not success or frame is None:
-                    print("Failed to read frame or frame is None")
+                # Attempt to read a frame
+                ret, frame = camera.read()
+                
+                if not ret or frame is None:
+                    print(f"generate_frames: Failed to read frame. Ret: {ret}, Frame is None: {frame is None}")
                     consecutive_failures += 1
                     if consecutive_failures >= max_failures:
-                        print("Too many consecutive failures, reinitializing camera")
+                        print("generate_frames: Too many consecutive frame read failures, reinitializing camera.")
                         release_camera()
                         consecutive_failures = 0
-                        time.sleep(1)  # Wait before retrying
+                        time.sleep(1)  # Wait before retrying camera reinitialization
                     continue
                 
-                consecutive_failures = 0  # Reset on successful frame
+                consecutive_failures = 0  # Reset on successful frame read
                 frame_count += 1
                 
                 if frame_count % 30 == 0:  # Log every 30 frames
-                    print(f"Streaming frame {frame_count}, size: {frame.shape}")
+                    print(f"generate_frames: Streaming frame {frame_count}, size: {frame.shape}")
                 
-                # Process frame if needed
+                # Process frame if needed (this should be fast)
                 processed_frame = detect_defects(frame)
                 
                 # Encode frame with lower quality for better performance
                 ret, buffer = cv2.imencode('.jpg', processed_frame, 
                                          [cv2.IMWRITE_JPEG_QUALITY, 70])
                 if not ret:
-                    print("Failed to encode frame")
+                    print("generate_frames: Failed to encode frame.")
                     continue
                 
                 frame = buffer.tobytes()
@@ -220,9 +227,15 @@ def generate_frames():
             time.sleep(0.033)  # ~30 FPS
             
         except Exception as e:
-            print(f"Error in generate_frames: {e}")
+            print(f"generate_frames: Error in loop: {e}")
             time.sleep(1)  # Wait before retrying
+            # Consider breaking if the error is persistent and unrecoverable
+            # For now, let's keep retrying to see if it recovers
             continue
+    
+    # If the loop breaks, ensure camera is released
+    print("generate_frames: Exiting loop. Releasing camera.")
+    release_camera()
 
 @app.route('/')
 def index():
@@ -231,11 +244,12 @@ def index():
         # Release model when switching to live stream
         release_model()
         
-        # Initialize camera
+        # Ensure camera is initialized before rendering the page
+        # This will block until the camera is ready or fails
         camera = get_camera()
         if camera is None:
-            print("Failed to initialize camera in index route")
-            return "Error: Could not initialize camera", 500
+            print("Failed to initialize camera in index route. Showing error page.")
+            return "Error: Could not initialize camera. Check console for details.", 500
         
         print("Successfully initialized camera in index route")
         return render_template('index.html')
