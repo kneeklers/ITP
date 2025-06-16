@@ -8,22 +8,14 @@ from trt_infer import TensorRTInference
 
 app = Flask(__name__)
 
-# Global variables
-camera = None
-camera_lock = threading.Lock()
+# Global variables (except for 'camera' object itself, now managed by CameraStream)
+# camera = None # Removed global camera object
+camera_lock = threading.Lock() # Still used by get_camera for thread-safety during creation
 model = None
 model_lock = threading.Lock()
 
-# GStreamer pipeline for camera (IMPORTANT: Choose one based on your camera type)
-# For CSI camera (e.g., Raspberry Pi Camera Module V2):
-# GSTREAMER_PIPELINE = "nvarguscamerasrc sensor_id=0 ! video/x-raw(memory:NVMM), width=(int)640, height=(int)480, format=(string)NV12, framerate=(fraction)30/1 ! nvvidconv flip-method=0 ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
-
-# For USB camera (replace /dev/video0 with your camera device if different):
-# GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! video/x-raw, width=(int)640, height=(int)480, framerate=(fraction)30/1 ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
-
-# Default to None, user MUST uncomment and set one
-# GSTREAMER_PIPELINE = None # This line should now be commented out or removed
-GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! image/jpeg,width=640,height=480,framerate=30/1 ! jpegdec ! videoconvert ! video/x-raw, format=(string)BGR ! appsink drop=true sync=false"
+# GStreamer pipeline for camera
+GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! video/x-raw, format=YUY2, width=640, height=480, framerate=30/1 ! videoconvert ! video/x-raw, format=BGR ! appsink drop=true sync=false max-buffers=1 wait-on-eos=false"
 
 # Load the model once at startup for efficiency
 MODEL_PATH = 'models/your_model.engine'
@@ -32,63 +24,163 @@ MODEL_PATH = 'models/your_model.engine'
 os.makedirs('uploads', exist_ok=True)
 os.makedirs('static/results', exist_ok=True)
 
-def get_camera():
-    global camera
-    with camera_lock:
-        if camera is None:
-            print("Attempting to initialize camera...")
-            if GSTREAMER_PIPELINE is None:
-                print("ERROR: GSTREAMER_PIPELINE is not set. Please uncomment and configure it in app.py")
-                return None
+# Global variable to hold the latest frame from the camera stream
+latest_frame = None
+latest_frame_lock = threading.Lock()
+camera_stream_running = False
 
-            try:
-                print(f"Opening camera with GStreamer pipeline: {GSTREAMER_PIPELINE}")
-                camera = cv2.VideoCapture(GSTREAMER_PIPELINE, cv2.CAP_GSTREAMER)
-                
-                if camera.isOpened():
-                    # No need to set properties like width, height, fps here, as they are defined in the GStreamer pipeline.
-                    # We'll just confirm it's opened and try to read a few frames.
-                    
-                    # Try to read several test frames to ensure stream is active
-                    test_frames_to_read = 5 # Reduced test frames for faster startup
-                    frames_read_successfully = 0
-                    for i in range(test_frames_to_read):
-                        ret, frame = camera.read()
-                        if ret and frame is not None:
-                            frames_read_successfully += 1
-                            # print(f"Read test frame {i+1}/{test_frames_to_read} successfully. Frame shape: {frame.shape}") # Keep this if more verbose logging is needed
-                            time.sleep(0.01) # Small delay to allow buffer to fill
-                        else:
-                            print(f"Failed to read test frame {i+1}/{test_frames_to_read} from GStreamer pipeline. Ret: {ret}, Frame is None: {frame is None}")
-                            
-                    if frames_read_successfully >= 3: # Require at least 3 successful frames to consider it stable
-                        print(f"Camera initialized successfully using GStreamer pipeline. Read {frames_read_successfully} test frames.")
-                        return camera
+class CameraStream:
+    def __init__(self):
+        self._camera_instance = None # Private instance of VideoCapture
+        self.running = False
+        self.thread = None
+        self.lock = threading.Lock() # For protecting internal state of CameraStream
+
+    def start(self):
+        global camera_stream_running
+        with self.lock:
+            if self.running:
+                print("CameraStream: Already running.")
+                return
+
+            self.running = True
+            camera_stream_running = True
+            self.thread = threading.Thread(target=self._update, args=())
+            self.thread.daemon = True # Daemon threads exit when the main program exits
+            self.thread.start()
+            print("CameraStream thread started.")
+
+    def _update(self):
+        global latest_frame
+        global camera_stream_running
+
+        print("CameraStream._update: Thread started, acquiring camera...")
+        # Acquire a new camera instance for this thread
+        self._camera_instance = _get_camera_instance()
+        if self._camera_instance is None:
+            print("CameraStream._update: Failed to acquire camera, thread stopping.")
+            self.running = False
+            camera_stream_running = False
+            return
+
+        print("CameraStream._update: Camera acquired. Starting frame read loop.")
+
+        frame_read_count = 0
+        consecutive_read_failures = 0
+        max_read_failures = 10 # Allow more failures before full reinit
+
+        while self.running:
+            print("CameraStream._update: Attempting to read frame from camera...")
+            ret, frame = self._camera_instance.read()
+
+            if not ret or frame is None:
+                consecutive_read_failures += 1
+                print(f"CameraStream._update: Failed to read frame ({consecutive_read_failures}/{max_read_failures}). Ret: {ret}, Frame is None: {frame is None}")
+                if consecutive_read_failures >= max_read_failures:
+                    print("CameraStream._update: Max consecutive frame read failures reached. Releasing and re-acquiring camera.")
+                    if self._camera_instance:
+                        self._camera_instance.release()
+                    self._camera_instance = _get_camera_instance() # Re-acquire camera
+                    if self._camera_instance is None:
+                        print("CameraStream._update: Re-acquisition failed, thread stopping.")
+                        self.running = False
+                        camera_stream_running = False
+                        break
+                    consecutive_read_failures = 0 # Reset failures on successful re-acquisition
+                    time.sleep(0.5) # Small delay after re-acquisition
+                time.sleep(0.05) # Small delay on read failure to prevent busy-waiting
+                continue
+
+            consecutive_read_failures = 0  # Reset on successful frame read
+            frame_read_count += 1
+            if frame_read_count % 100 == 0:
+                print(f"CameraStream._update: Successfully read {frame_read_count} frames.")
+
+            with latest_frame_lock:
+                latest_frame = frame.copy()
+
+            time.sleep(0.01) # Small delay to control CPU usage
+
+        print("CameraStream._update: Thread stopping. Releasing camera instance.")
+        if self._camera_instance:
+            self._camera_instance.release()
+        self._camera_instance = None
+        self.running = False
+        camera_stream_running = False
+
+    def stop(self):
+        with self.lock:
+            if not self.running:
+                print("CameraStream: Not running.")
+                return
+            self.running = False
+            if self.thread and self.thread.is_alive():
+                print("CameraStream: Waiting for thread to finish...")
+                self.thread.join(timeout=3) # Increased timeout
+                if self.thread.is_alive():
+                    print("CameraStream: Warning! Thread did not terminate gracefully within timeout.")
+            self.thread = None
+            print("CameraStream thread stopped.")
+
+# Instantiate the camera stream manager
+camera_manager = CameraStream()
+
+# Renamed get_camera to _get_camera_instance to emphasize it returns a new instance
+def _get_camera_instance():
+    # This function now exclusively focuses on creating and testing a new VideoCapture instance.
+    # It does not manage a global 'camera' variable.
+    with camera_lock: # Still use the lock to prevent multiple threads from initializing cameras concurrently
+        print("Attempting to create and test a new camera instance...")
+        if GSTREAMER_PIPELINE is None:
+            print("ERROR: GSTREAMER_PIPELINE is not set. Please uncomment and configure it in app.py")
+            return None
+
+        try:
+            print(f"Opening camera with GStreamer pipeline: {GSTREAMER_PIPELINE}")
+            cam_instance = cv2.VideoCapture(GSTREAMER_PIPELINE, cv2.CAP_GSTREAMER)
+
+            if cam_instance.isOpened():
+                test_frames_to_read = 5
+                frames_read_successfully = 0
+                for i in range(test_frames_to_read):
+                    ret, frame = cam_instance.read()
+                    if ret and frame is not None:
+                        frames_read_successfully += 1
+                        time.sleep(0.01)
                     else:
-                        print("Not enough test frames could be read with GStreamer pipeline. Releasing camera.")
-                        camera.release()
-                        camera = None
-                else:
-                    print("Camera not opened with GStreamer pipeline.")
-                    camera = None 
+                        print(f"Failed to read test frame {i+1}/{test_frames_to_read} from GStreamer pipeline. Ret: {ret}, Frame is None: {frame is None}")
 
-            except Exception as e:
-                print(f"Error during GStreamer camera initialization: {e}")
-                if camera is not None:
-                    camera.release()
-                    camera = None
+                if frames_read_successfully >= 3:
+                    print(f"Camera instance successfully created and tested. Read {frames_read_successfully} test frames.")
+                    return cam_instance # Return the newly created and tested instance
+                else:
+                    print("Not enough test frames could be read. Releasing new camera instance.")
+                    cam_instance.release()
+                    return None
+            else:
+                print("Camera instance not opened with GStreamer pipeline.")
                 return None
-    return camera
+
+        except Exception as e:
+            print(f"Error during GStreamer camera instance creation: {e}")
+            # Ensure the instance is released if an error occurs during its creation
+            if 'cam_instance' in locals() and cam_instance.isOpened():
+                cam_instance.release()
+            return None
 
 def release_camera():
-    global camera
-    with camera_lock:
-        if camera is not None:
-            try:
-                camera.release()
-                camera = None
-            except Exception as e:
-                print(f"Error releasing camera: {e}")
+    # This function now primarily stops the CameraStream thread.
+    # The CameraStream thread is responsible for releasing its own VideoCapture instance.
+    global camera_stream_running
+    if camera_stream_running:
+        print("release_camera: Stopping CameraStream thread.")
+        camera_manager.stop()
+        # Optionally, clear latest_frame if no stream is expected
+        global latest_frame
+        with latest_frame_lock:
+            latest_frame = None
+    else:
+        print("release_camera: CameraStream not running or already stopped.")
 
 def get_model():
     global model
@@ -170,88 +262,55 @@ def process_image(image_path):
         return None
 
 def generate_frames():
-    frame_count = 0
-    consecutive_failures = 0
-    max_failures = 5
-    
-    print("Starting frame generation loop...")
-    
+    global latest_frame
+    print("generate_frames: Starting frame generation loop (reading from shared buffer)...")
+
     while True:
         try:
-            # Ensure camera is acquired within the lock to prevent race conditions
-            with camera_lock:
-                camera = get_camera()
-                if camera is None:
-                    print("generate_frames: Camera not available, retrying...")
-                    time.sleep(1)  # Wait before retrying camera acquisition
-                    consecutive_failures += 1 # Treat as a failure to get camera
-                    if consecutive_failures >= max_failures:
-                        print("generate_frames: Max consecutive camera failures reached. Exiting stream.")
-                        break
-                    continue
-                
-                # Attempt to read a frame
-                ret, frame = camera.read()
-                
-                if not ret or frame is None:
-                    print(f"generate_frames: Failed to read frame. Ret: {ret}, Frame is None: {frame is None}")
-                    consecutive_failures += 1
-                    if consecutive_failures >= max_failures:
-                        print("generate_frames: Too many consecutive frame read failures, reinitializing camera.")
-                        release_camera()
-                        consecutive_failures = 0
-                        time.sleep(1)  # Wait before retrying camera reinitialization
-                    continue
-                
-                consecutive_failures = 0  # Reset on successful frame read
-                frame_count += 1
-                
-                if frame_count % 30 == 0:  # Log every 30 frames
-                    print(f"generate_frames: Streaming frame {frame_count}, size: {frame.shape}")
-                
-                # Process frame if needed (this should be fast)
-                processed_frame = detect_defects(frame)
-                
-                # Encode frame with lower quality for better performance
-                ret, buffer = cv2.imencode('.jpg', processed_frame, 
-                                         [cv2.IMWRITE_JPEG_QUALITY, 70])
-                if not ret:
-                    print("generate_frames: Failed to encode frame.")
-                    continue
-                
-                frame = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            # Ensure the CameraStream thread is running to provide frames
+            if not camera_manager.running:
+                print("generate_frames: CameraStream is not running. Attempting to start.")
+                camera_manager.start()
+                time.sleep(1) # Give time for the stream to start
+
+            # Wait for the first frame to become available
+            if latest_frame is None:
+                print("generate_frames: No frames in buffer yet. Waiting...")
+                time.sleep(0.5) # Wait for a frame to become available
+                continue
+
+            with latest_frame_lock: # Acquire lock to safely read the frame
+                frame_to_process = latest_frame.copy()
             
-            # Control frame rate
-            time.sleep(0.033)  # ~30 FPS
-            
+            # Process frame
+            processed_frame = detect_defects(frame_to_process)
+
+            # Encode frame
+            ret, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if not ret:
+                print("generate_frames: Failed to encode frame.")
+                continue
+
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+            time.sleep(0.033) # ~30 FPS
+
         except Exception as e:
             print(f"generate_frames: Error in loop: {e}")
-            time.sleep(1)  # Wait before retrying
-            # Consider breaking if the error is persistent and unrecoverable
-            # For now, let's keep retrying to see if it recovers
+            time.sleep(1) # Wait before retrying
             continue
-    
-    # If the loop breaks, ensure camera is released
-    print("generate_frames: Exiting loop. Releasing camera.")
-    release_camera()
+
+    print("generate_frames: Exiting loop.")
 
 @app.route('/')
 def index():
     try:
         print("Accessing index route")
-        # Release model when switching to live stream
-        release_model()
-        
-        # Ensure camera is initialized before rendering the page
-        # This will block until the camera is ready or fails
-        camera = get_camera()
-        if camera is None:
-            print("Failed to initialize camera in index route. Showing error page.")
-            return "Error: Could not initialize camera. Check console for details.", 500
-        
-        print("Successfully initialized camera in index route")
+        release_model() # Release model if moving to live stream
+        camera_manager.start() # Ensure camera stream is running
+        time.sleep(0.5) # Give the camera stream a moment to start
         return render_template('index.html')
     except Exception as e:
         print(f"Error in index route: {e}")
@@ -270,10 +329,10 @@ def video_feed():
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_page():
     try:
-        # Release camera and ensure model is released before switching to upload page
-        release_camera()
-        release_model()  # Ensure model is released before processing
-        
+        print("Accessing upload page")
+        camera_manager.stop() # Stop camera stream for upload
+        release_model() # Ensure model is released before processing
+
         if request.method == 'POST':
             try:
                 if 'image' not in request.files:
@@ -289,19 +348,14 @@ def upload_page():
                     print("Invalid file")
                     return render_template('upload.html', result=None, error="Invalid file")
                 
-                # Create uploads directory if it doesn't exist
                 os.makedirs('uploads', exist_ok=True)
-                
-                # Save the file
                 filename = os.path.join('uploads', file.filename)
                 file.save(filename)
                 print(f"File saved to {filename}")
                 
-                # Process the image
                 result = process_image(filename)
                 print(f"Processing result: {result}")
                 
-                # Clean up
                 try:
                     os.remove(filename)
                 except Exception as e:
@@ -324,7 +378,8 @@ def upload_page():
 @app.route('/shutdown')
 def shutdown():
     try:
-        release_camera()
+        print("Shutting down application...")
+        release_camera() # This will stop the CameraStream thread
         release_model()
         return "Resources released"
     except Exception as e:
@@ -333,10 +388,11 @@ def shutdown():
 
 if __name__ == '__main__':
     try:
-        # Ensure clean state at startup
-        release_camera()
+        print("Application starting...")
+        release_camera() # Ensure camera manager is stopped at startup
         release_model()
-        app.run(host='0.0.0.0', port=5000, debug=True, threaded=False)
+        app.run(host='0.0.0.0', port=5000, debug=True, threaded=False) # threaded=False as we manage our own threads
     finally:
+        print("Application exiting. Ensuring resources are released.")
         release_camera()
         release_model() 
