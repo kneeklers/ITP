@@ -28,18 +28,25 @@ def get_camera():
             try:
                 # Try different camera backends
                 for backend in [cv2.CAP_ANY, cv2.CAP_V4L2, cv2.CAP_DSHOW]:
-                    camera = cv2.VideoCapture(0, backend)
-                    if camera.isOpened():
-                        # Set camera properties
-                        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                        camera.set(cv2.CAP_PROP_FPS, 30)
-                        # Try to read a test frame
-                        ret, _ = camera.read()
-                        if ret:
-                            print(f"Camera initialized successfully with backend {backend}")
-                            return camera
-                        else:
+                    try:
+                        camera = cv2.VideoCapture(0, backend)
+                        if camera.isOpened():
+                            # Set camera properties
+                            camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                            camera.set(cv2.CAP_PROP_FPS, 30)
+                            # Try to read a test frame
+                            ret, _ = camera.read()
+                            if ret:
+                                print(f"Camera initialized successfully with backend {backend}")
+                                return camera
+                            else:
+                                print(f"Failed to read test frame with backend {backend}")
+                                camera.release()
+                                camera = None
+                    except Exception as e:
+                        print(f"Error with backend {backend}: {e}")
+                        if camera is not None:
                             camera.release()
                             camera = None
             except Exception as e:
@@ -98,7 +105,8 @@ def release_model():
                 print(f"Error releasing model: {e}")
 
 def detect_defects(frame):
-    # Placeholder for live defect detection
+    # For now, just return the original frame
+    # You can add your defect detection logic here later
     return frame
 
 def process_image(image_path):
@@ -140,33 +148,41 @@ def process_image(image_path):
 
 def generate_frames():
     frame_count = 0
+    consecutive_failures = 0
+    max_failures = 5
+    
     while True:
         try:
             with camera_lock:
                 camera = get_camera()
                 if camera is None:
                     print("Camera not available")
-                    break
+                    time.sleep(1)  # Wait before retrying
+                    continue
                 
                 success, frame = camera.read()
                 if not success:
                     print("Failed to read frame")
-                    # Try to reinitialize camera
-                    release_camera()
-                    camera = get_camera()
-                    if camera is None:
-                        break
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_failures:
+                        print("Too many consecutive failures, reinitializing camera")
+                        release_camera()
+                        consecutive_failures = 0
+                        time.sleep(1)  # Wait before retrying
                     continue
                 
+                consecutive_failures = 0  # Reset on successful frame
                 frame_count += 1
+                
                 if frame_count % 30 == 0:  # Log every 30 frames
                     print(f"Streaming frame {frame_count}")
                 
                 # Process frame if needed
                 processed_frame = detect_defects(frame)
                 
-                # Encode frame
-                ret, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                # Encode frame with lower quality for better performance
+                ret, buffer = cv2.imencode('.jpg', processed_frame, 
+                                         [cv2.IMWRITE_JPEG_QUALITY, 70])
                 if not ret:
                     print("Failed to encode frame")
                     continue
@@ -175,14 +191,13 @@ def generate_frames():
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
             
+            # Control frame rate
             time.sleep(0.033)  # ~30 FPS
             
         except Exception as e:
             print(f"Error in generate_frames: {e}")
-            break
-    
-    # Clean up if loop breaks
-    release_camera()
+            time.sleep(1)  # Wait before retrying
+            continue
 
 @app.route('/')
 def index():
@@ -193,6 +208,7 @@ def index():
         # Initialize camera
         camera = get_camera()
         if camera is None:
+            print("Failed to initialize camera in index route")
             return "Error: Could not initialize camera", 500
         
         return render_template('index.html')
