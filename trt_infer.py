@@ -2,12 +2,15 @@ import tensorrt as trt
 import numpy as np
 import cv2
 import pycuda.driver as cuda
-import pycuda.autoinit
+# import pycuda.autoinit # REMOVED: Manually manage CUDA context
 import colorsys
 
 class TensorRTInference:
     def __init__(self, engine_path):
         # Initialize CUDA context
+        # Ensure the device is available and create context
+        if cuda.Device.count() == 0:
+            raise RuntimeError("No CUDA devices found. Cannot initialize TensorRT.")
         self.cuda_ctx = cuda.Device(0).make_context()
         print("TensorRTInference: CUDA context created.")
         

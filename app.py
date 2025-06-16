@@ -10,7 +10,7 @@ app = Flask(__name__)
 
 # Global variables (except for 'camera' object itself, now managed by CameraStream)
 # camera = None # Removed global camera object
-camera_lock = threading.Lock() # Still used by get_camera for thread-safety during creation
+camera_lock = threading.Lock() # Still used by _get_camera_instance for thread-safety during creation
 model = None
 model_lock = threading.Lock()
 
@@ -53,14 +53,34 @@ class CameraStream:
     def _update(self):
         global latest_frame
         global camera_stream_running
+        import pycuda.driver as cuda
 
         print("CameraStream._update: Thread started, acquiring camera...")
+        # Ensure any existing CUDA context on this thread is popped before acquiring new camera
+        try:
+            # Pop current context if one exists on this thread
+            current_ctx_on_thread = cuda.Context.get_current()
+            if current_ctx_on_thread:
+                current_ctx_on_thread.pop()
+                print("CameraStream._update: Popped existing CUDA context on thread before camera acquisition.")
+        except cuda.LogicError:
+            pass # No context was current
+        except Exception as e:
+            print(f"CameraStream._update: Error popping CUDA context on thread startup: {e}")
+
         # Acquire a new camera instance for this thread
         self._camera_instance = _get_camera_instance()
         if self._camera_instance is None:
             print("CameraStream._update: Failed to acquire camera, thread stopping.")
             self.running = False
             camera_stream_running = False
+            # Ensure context is popped if creation failed after a partial context push
+            try:
+                current_ctx_on_thread = cuda.Context.get_current()
+                if current_ctx_on_thread:
+                    current_ctx_on_thread.pop()
+            except:
+                pass
             return
 
         print("CameraStream._update: Camera acquired. Starting frame read loop.")
@@ -70,8 +90,9 @@ class CameraStream:
         max_read_failures = 10 # Allow more failures before full reinit
 
         while self.running:
-            print("CameraStream._update: Attempting to read frame from camera...")
+            # print("CameraStream._update: Attempting to read frame...") # Uncomment for extreme verbosity
             ret, frame = self._camera_instance.read()
+            # print(f"CameraStream._update: Read result: ret={ret}, frame is None={frame is None}") # Uncomment for extreme verbosity
 
             if not ret or frame is None:
                 consecutive_read_failures += 1
@@ -80,6 +101,17 @@ class CameraStream:
                     print("CameraStream._update: Max consecutive frame read failures reached. Releasing and re-acquiring camera.")
                     if self._camera_instance:
                         self._camera_instance.release()
+                    # Pop context before re-acquisition attempt
+                    try:
+                        current_ctx_on_thread = cuda.Context.get_current()
+                        if current_ctx_on_thread:
+                            current_ctx_on_thread.pop()
+                            print("CameraStream._update: Popped CUDA context before re-acquiring camera.")
+                    except cuda.LogicError:
+                        pass # No context was current
+                    except Exception as e:
+                        print(f"CameraStream._update: Error popping CUDA context during re-acquisition: {e}")
+
                     self._camera_instance = _get_camera_instance() # Re-acquire camera
                     if self._camera_instance is None:
                         print("CameraStream._update: Re-acquisition failed, thread stopping.")
@@ -107,6 +139,17 @@ class CameraStream:
         self._camera_instance = None
         self.running = False
         camera_stream_running = False
+        
+        # Ensure CUDA context is popped when thread exits
+        try:
+            current_ctx_on_thread = cuda.Context.get_current()
+            if current_ctx_on_thread:
+                current_ctx_on_thread.pop()
+                print("CameraStream._update: Popped CUDA context on thread exit.")
+        except cuda.LogicError:
+            pass # No context was current
+        except Exception as e:
+            print(f"CameraStream._update: Error popping CUDA context on thread exit: {e}")
 
     def stop(self):
         with self.lock:
