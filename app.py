@@ -21,9 +21,10 @@ GSTREAMER_PIPELINE = "v4l2src device=/dev/video0 ! image/jpeg,width=640,height=4
 # Load the model once at startup for efficiency
 MODEL_PATH = 'models/your_model.engine'
 
-# Create uploads and results directories if they don't exist
-os.makedirs('uploads', exist_ok=True)
+# Create uploads, results, and original image directories if they don't exist
+os.makedirs('uploads', exist_ok=True) # This can probably be removed now if we save directly to static/uploaded_originals
 os.makedirs('static/results', exist_ok=True)
+os.makedirs('static/uploaded_originals', exist_ok=True)
 
 # Global variable to hold the latest frame from the camera stream
 latest_frame = None
@@ -349,7 +350,8 @@ def process_image(image_path):
         summary = {
             'defect_type': ', '.join([model_instance.class_names.get(c, str(c)) for c in class_ids]) if class_ids else 'None',
             'confidence': ', '.join([f'{s*100:.2f}' for s in scores]) if scores else '0.00',
-            'result_image': result_filename
+            'result_image': result_filename,
+            # original_image_path will be set by the upload_page route
         }
         return summary
 
@@ -457,23 +459,23 @@ def upload_page():
                     print("Invalid file")
                     return render_template('upload.html', result=None, error="Invalid file")
                 
-                os.makedirs('uploads', exist_ok=True)
-                filename = os.path.join('uploads', file.filename)
-                file.save(filename)
-                print(f"File saved to {filename}")
+                # Generate a unique filename for the original image
+                original_filename = f"original_{int(time.time())}_{file.filename}"
+                original_save_path = os.path.join('static/uploaded_originals', original_filename)
+                file.save(original_save_path)
+                print(f"Original file saved to {original_save_path}")
                 
-                result = process_image(filename)
+                # Process the image from the saved original path
+                result = process_image(original_save_path)
                 print(f"Processing result: {result}")
                 
-                try:
-                    os.remove(filename)
-                except Exception as e:
-                    print(f"Error removing file: {e}")
+                # No longer delete the original file here as it's saved in static/uploaded_originals for display
                 
                 if result is None:
                     return render_template('upload.html', result=None, error="Error processing image")
                 
-                return render_template('upload.html', result=result)
+                # Pass both the detection results and the original image URL to the template
+                return render_template('upload.html', result=result, original_image_url=url_for('static', filename='uploaded_originals/' + original_filename))
                 
             except Exception as e:
                 print(f"Error in upload POST: {str(e)}")
