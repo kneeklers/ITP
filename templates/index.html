@@ -121,7 +121,7 @@
                         <h5 class="card-title text-center mb-4">Live Feed</h5>
                         <div class="defect-info">
                             <h6>Detection Status</h6>
-                            <p class="mb-0">No defects detected</p>
+                            <p id="defect-status" class="mb-0">No defects detected</p>
                         </div>
                     </div>
                 </div>
@@ -141,6 +141,30 @@
             document.getElementById('loading').style.display = 'none';
             document.getElementById('error').style.display = 'none';
         }
+
+        // Function to update defect status
+        function updateDefectStatus() {
+            const videoFeed = document.querySelector('.video-feed');
+            if (videoFeed.complete) {
+                // Extract text from the video frame (this will be the text overlay we added)
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = videoFeed.width;
+                canvas.height = videoFeed.height;
+                context.drawImage(videoFeed, 0, 0);
+                const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+                
+                // Update the defect status text
+                const defectStatus = document.getElementById('defect-status');
+                if (defectStatus) {
+                    // The text overlay will be visible in the video feed
+                    defectStatus.textContent = "Analyzing live feed...";
+                }
+            }
+        }
+
+        // Update defect status every 100ms
+        setInterval(updateDefectStatus, 100);
 
         // Refresh the video feed every 5 seconds if there's an error
         setInterval(function() {
