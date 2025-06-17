@@ -9,7 +9,6 @@
         .preview-image { max-width: 100%; max-height: 400px; margin-top: 20px; }
         .loading { display: none; }
         .error-message { color: red; margin-top: 10px; }
-        .displayed-image { max-width: 100%; max-height: 400px; margin-top: 20px; }
     </style>
 </head>
 <body>
@@ -44,25 +43,12 @@
                         </div>
                         {% endif %}
                         {% if result %}
-                        <div class="row">
-                            <div class="col-md-6">
-                                <h5>Original Image</h5>
-                                {% if original_image_url %}
-                                <img src="{{ original_image_url }}" class="img-fluid mt-3 displayed-image">
-                                {% else %}
-                                <p>No original image to display.</p>
-                                {% endif %}
-                            </div>
-                            <div class="col-md-6">
-                                <h5>Detected Image</h5>
-                                <div class="alert alert-info">
-                                    <h4>Defect Type: {{ result.defect_type }}</h4>
-                                    <p>Confidence: {{ result.confidence }}%</p>
-                                    {% if result.result_image %}
-                                    <img src="{{ url_for('static', filename='results/' + result.result_image) }}" class="img-fluid mt-3 displayed-image">
-                                    {% endif %}
-                                </div>
-                            </div>
+                        <div class="alert alert-info">
+                            <h4>Defect Type: {{ result.defect_type }}</h4>
+                            <p>Confidence: {{ result.confidence }}%</p>
+                            {% if result.result_image %}
+                            <img src="{{ url_for('static', filename='results/' + result.result_image) }}" class="img-fluid mt-3">
+                            {% endif %}
                         </div>
                         {% endif %}
                     </div>
@@ -83,7 +69,7 @@
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const preview = document.getElementById('preview');
-                    preview.innerHTML = `<img src="${e.target.result}" class="img-fluid displayed-image">`;
+                    preview.innerHTML = `<img src="${e.target.result}" class="img-fluid">`;
                 }
                 reader.readAsDataURL(file);
             }
