@@ -166,11 +166,10 @@
             fetch('/live_status')
                 .then(response => response.json())
                 .then(data => {
-                    document.getElementById('defect-status').textContent = data.defect_info;
                     const list = document.getElementById('detection-list');
                     list.innerHTML = '';
                     if (data.history && data.history.length > 0) {
-                        for (let i = data.history.length - 1; i >= 0; i--) { // Show most recent first
+                        for (let i = data.history.length - 1; i >= 0; i--) {
                             const item = data.history[i];
                             const li = document.createElement('li');
                             li.textContent = `${item.timestamp}: ${item.type} (${item.confidence})`;
@@ -183,7 +182,6 @@
                     }
                 })
                 .catch(err => {
-                    document.getElementById('defect-status').textContent = 'Detection status unavailable';
                     const list = document.getElementById('detection-list');
                     list.innerHTML = '';
                     const li = document.createElement('li');
