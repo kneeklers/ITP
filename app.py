@@ -375,7 +375,7 @@ def process_image(image_path):
 
 def generate_frames():
     global latest_frame
-    print("generate_frames: Starting frame generation loop (raw frames, no model)...")
+    print("generate_frames: Starting frame generation loop (real-time analysis)...")
     while True:
         try:
             if not camera_manager.running:
@@ -388,8 +388,9 @@ def generate_frames():
                 continue
             with latest_frame_lock:
                 frame_to_process = latest_frame.copy()
-            # No model inference, just stream the frame
-            ret, buffer = cv2.imencode('.jpg', frame_to_process, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            # Perform real-time inference and draw bounding boxes
+            processed_frame = detect_defects(frame_to_process)
+            ret, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
             if not ret:
                 print("generate_frames: Failed to encode frame.")
                 continue
