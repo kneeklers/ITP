@@ -167,6 +167,7 @@
                 .then(response => response.json())
                 .then(data => {
                     const list = document.getElementById('detection-list');
+                    if (!list) return; // Safety: don't run if element missing
                     list.innerHTML = '';
                     if (data.history && data.history.length > 0) {
                         for (let i = data.history.length - 1; i >= 0; i--) {
@@ -183,6 +184,7 @@
                 })
                 .catch(err => {
                     const list = document.getElementById('detection-list');
+                    if (!list) return;
                     list.innerHTML = '';
                     const li = document.createElement('li');
                     li.textContent = 'Error fetching detection details';
