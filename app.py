@@ -215,6 +215,7 @@ def _get_camera_instance():
             "appsink drop=true sync=false wait-on-eos=false"
         )
 
+
         try:
             print(f"Opening camera with GStreamer pipeline: {gstreamer_pipeline_string}")
             cam_instance = cv2.VideoCapture(gstreamer_pipeline_string, cv2.CAP_GSTREAMER)
