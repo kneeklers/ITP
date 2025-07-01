@@ -22,6 +22,7 @@ GSTREAMER_PIPELINE = (
     "videoconvert ! video/x-raw, format=BGR ! appsink"
 )
 
+
 # Load the model once at startup for efficiency
 MODEL_PATH = 'models/best12.engine'
 
@@ -207,7 +208,12 @@ def _get_camera_instance():
         print("Attempting to create and test a new camera instance (using GStreamer pipeline)...")
         
         # Re-introduce the specific GStreamer pipeline
-        gstreamer_pipeline_string = "nvarguscamerasrc ! video/x-raw(memory:NVMM),width=640,height=480,framerate=30/1 ! jpegdec ! videoconvert ! video/x-raw, format=BGR ! queue leaky=downstream max-size-buffers=1 ! appsink drop=true sync=false wait-on-eos=false"
+        gstreamer_pipeline_string = (
+            "nvarguscamerasrc ! video/x-raw(memory:NVMM), width=640, height=480, "
+            "format=NV12, framerate=30/1 ! nvvidconv ! video/x-raw, format=BGRx ! "
+            "videoconvert ! video/x-raw, format=BGR ! queue leaky=downstream max-size-buffers=1 ! "
+            "appsink drop=true sync=false wait-on-eos=false"
+        )
 
         try:
             print(f"Opening camera with GStreamer pipeline: {gstreamer_pipeline_string}")
