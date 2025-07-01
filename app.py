@@ -374,57 +374,32 @@ def process_image(image_path):
 
 def generate_frames():
     global latest_frame
-    print("generate_frames: Starting frame generation loop (reading from shared buffer)...")
-    
-    # Initialize model at the start of the stream
-    model_instance = get_model()
-    if model_instance is None:
-        print("generate_frames: Failed to initialize model")
-        return
-
-    try:
-        while True:
-            try:
-                # Ensure the CameraStream thread is running to provide frames
-                if not camera_manager.running:
-                    print("generate_frames: CameraStream is not running. Attempting to start.")
-                    camera_manager.start()
-                    time.sleep(1) # Give time for the stream to start
-
-                # Wait for the first frame to become available
-                if latest_frame is None:
-                    print("generate_frames: No frames in buffer yet. Waiting...")
-                    time.sleep(0.5) # Wait for a frame to become available
-                    continue
-
-                with latest_frame_lock: # Acquire lock to safely read the frame
-                    frame_to_process = latest_frame.copy()
-                
-                # Process frame with defect detection
-                processed_frame = detect_defects(frame_to_process)
-
-                # Encode frame with lower quality for better performance
-                ret, buffer = cv2.imencode('.jpg', processed_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                if not ret:
-                    print("generate_frames: Failed to encode frame.")
-                    continue
-
-                frame_bytes = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-
-                # Control frame rate
-                time.sleep(0.033) # ~30 FPS
-
-            except Exception as e:
-                print(f"generate_frames: Error in loop: {e}")
-                time.sleep(1) # Wait before retrying
+    print("generate_frames: Starting frame generation loop (raw frames, no model)...")
+    while True:
+        try:
+            if not camera_manager.running:
+                print("generate_frames: CameraStream is not running. Attempting to start.")
+                camera_manager.start()
+                time.sleep(1)
+            if latest_frame is None:
+                print("generate_frames: No frames in buffer yet. Waiting...")
+                time.sleep(0.5)
                 continue
-
-    finally:
-        print("generate_frames: Exiting loop. Cleaning up resources...")
-        # Don't release the model here as it's shared across requests
-        # The model will be released when the application shuts down
+            with latest_frame_lock:
+                frame_to_process = latest_frame.copy()
+            # No model inference, just stream the frame
+            ret, buffer = cv2.imencode('.jpg', frame_to_process, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if not ret:
+                print("generate_frames: Failed to encode frame.")
+                continue
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            time.sleep(0.033)
+        except Exception as e:
+            print(f"generate_frames: Error in loop: {e}")
+            time.sleep(1)
+            continue
 
 @app.route('/')
 def index():
