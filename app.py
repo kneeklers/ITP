@@ -511,6 +511,7 @@ def shutdown():
         print(f"Error in shutdown: {e}")
         return "Error releasing resources", 500
 
+#ABOVEMAIN
 @app.route('/live_status')
 def live_status():
     with latest_detection_info_lock:
