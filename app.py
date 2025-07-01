@@ -6,6 +6,7 @@ import time
 import os
 from trt_infer import TensorRTInference
 import pycuda.driver as cuda
+cuda.init()
 
 app = Flask(__name__)
 
