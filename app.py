@@ -521,23 +521,11 @@ def shutdown():
 #ABOVEMAIN
 @app.route('/live_status')
 def live_status():
-    # Try to acquire the lock for up to 1 second
-    acquired = latest_detection_info_lock.acquire(timeout=1)
-    if not acquired:
-        print("LIVE STATUS: Could not acquire lock, returning fallback info.")
-        return jsonify({
-            'defect_info': 'Status unavailable',
-            'defect_types': [],
-            'confidences': [],
-            'history': []
-        })
-    try:
-        info = dict(latest_detection_info)
-        info['history'] = list(latest_detection_history)
-        print('LIVE STATUS RESPONSE:', info)
-        return jsonify(info)
-    finally:
-        latest_detection_info_lock.release()
+    # Return a shallow copy of the info and history without locking
+    info = dict(latest_detection_info)
+    info['history'] = list(latest_detection_history)
+    print('LIVE STATUS RESPONSE:', info)
+    return jsonify(info)
 
 if __name__ == '__main__':
     try:
