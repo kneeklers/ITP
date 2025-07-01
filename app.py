@@ -208,17 +208,19 @@ def _get_camera_instance():
         print("Attempting to create and test a new camera instance (using GStreamer pipeline)...")
         
         # Re-introduce the specific GStreamer pipeline
-        gstreamer_pipeline_string = (
-            "nvarguscamerasrc ! video/x-raw(memory:NVMM), width=640, height=480, "
-            "format=NV12, framerate=30/1 ! nvvidconv ! video/x-raw, format=BGRx ! "
-            "videoconvert ! video/x-raw, format=BGR ! queue leaky=downstream max-size-buffers=1 ! "
+        gst_pipeline = (
+            "nvarguscamerasrc ! "
+            "video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! "
+            "nvvidconv ! video/x-raw, format=BGRx ! "
+            "videoconvert ! video/x-raw, format=BGR ! "
+            "queue leaky=downstream max-size-buffers=1 ! "
             "appsink drop=true sync=false wait-on-eos=false"
         )
 
 
         try:
-            print(f"Opening camera with GStreamer pipeline: {gstreamer_pipeline_string}")
-            cam_instance = cv2.VideoCapture(gstreamer_pipeline_string, cv2.CAP_GSTREAMER)
+            print(f"Opening camera with GStreamer pipeline: {gst_pipeline}")
+            cam_instance = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
 
             if cam_instance.isOpened():
                 # No need to set properties explicitly, as they are in the GStreamer pipeline.
