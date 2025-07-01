@@ -532,7 +532,7 @@ if __name__ == '__main__':
         print("Application starting...")
         release_camera() # Ensure camera manager is stopped at startup
         release_model()
-        app.run(host='0.0.0.0', port=5000, debug=True, threaded=False) # threaded=False as we manage our own threads
+        app.run(host='0.0.0.0', port=5000, debug=True, threaded=True) # threaded=True to allow concurrent requests
     finally:
         print("Application exiting. Ensuring resources are released.")
         release_camera()
