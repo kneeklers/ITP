@@ -525,6 +525,7 @@ def live_status():
         info = dict(latest_detection_info)
     # Add detection history to the response
     info['history'] = list(latest_detection_history)
+    print('LIVE STATUS RESPONSE:', info)  # Debug print
     return jsonify(info)
 
 if __name__ == '__main__':
