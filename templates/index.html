@@ -3,6 +3,10 @@
 <head><title>Test Camera Feed</title></head>
 <body>
     <h1>Test Feed</h1>
-    <img src="/video_feed" width="640" height="480">
+    <video id="videoStream" autoplay muted playsinline width="640" height="480">
+    <source src="/video_feed" type="multipart/x-mixed-replace; boundary=frame">
+    Your browser does not support the video tag.
+</video>
+
 </body>
 </html>
