@@ -45,6 +45,9 @@ latest_detection_info = {
 }
 latest_detection_info_lock = threading.Lock()
 
+# Add global variable for detection history
+latest_detection_history = []  # List of dicts: {'type': ..., 'confidence': ..., 'timestamp': ...}
+
 class CameraStream:
     def __init__(self):
         self._camera_instance = None # Private instance of VideoCapture
@@ -327,6 +330,10 @@ def detect_defects(frame):
             defect_types = [model_instance.class_names.get(c, str(c)) for c in class_ids]
             confidences = [f'{s*100:.2f}%' for s in scores]
             defect_info = f"Detected: {', '.join(defect_types)} ({', '.join(confidences)})"
+            # Log each detection in the history
+            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            for dt, conf in zip(defect_types, confidences):
+                latest_detection_history.append({'type': dt, 'confidence': conf, 'timestamp': timestamp})
         else:
             defect_types = []
             confidences = []
@@ -516,6 +523,8 @@ def shutdown():
 def live_status():
     with latest_detection_info_lock:
         info = dict(latest_detection_info)
+    # Add detection history to the response
+    info['history'] = list(latest_detection_history)
     return jsonify(info)
 
 if __name__ == '__main__':

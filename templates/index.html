@@ -113,7 +113,7 @@
                             <p id="defect-status" class="mb-0">No defects detected</p>
                         </div>
                         <div class="mt-3" id="detection-details">
-                            <h6>Detection Details</h6>
+                            <h6>Detection Log</h6>
                             <ul id="detection-list" class="mb-0"></ul>
                         </div>
                     </div>
@@ -145,7 +145,7 @@
             }
         }
 
-        setInterval(updateDefectStatus, 100);
+        //setInterval(updateDefectStatus, 100);
 
         setInterval(function() {
             if (document.getElementById('error').style.display === 'block') {
@@ -169,15 +169,16 @@
                     document.getElementById('defect-status').textContent = data.defect_info;
                     const list = document.getElementById('detection-list');
                     list.innerHTML = '';
-                    if (data.defect_types && data.defect_types.length > 0) {
-                        for (let i = 0; i < data.defect_types.length; i++) {
+                    if (data.history && data.history.length > 0) {
+                        for (let i = data.history.length - 1; i >= 0; i--) { // Show most recent first
+                            const item = data.history[i];
                             const li = document.createElement('li');
-                            li.textContent = `${data.defect_types[i]} (${data.confidences[i]})`;
+                            li.textContent = `${item.timestamp}: ${item.type} (${item.confidence})`;
                             list.appendChild(li);
                         }
                     } else {
                         const li = document.createElement('li');
-                        li.textContent = 'No defects detected';
+                        li.textContent = 'No defects detected yet.';
                         list.appendChild(li);
                     }
                 })
