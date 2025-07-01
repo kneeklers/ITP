@@ -1,4 +1,4 @@
-from flask import Flask, render_template, Response, request, redirect, url_for
+from flask import Flask, render_template, Response, request, redirect, url_for, jsonify
 import cv2
 import numpy as np
 import threading
@@ -36,6 +36,14 @@ os.makedirs('static/uploaded_originals', exist_ok=True)
 latest_frame = None
 latest_frame_lock = threading.Lock()
 camera_stream_running = False
+
+# Add global variable for latest detection info
+latest_detection_info = {
+    'defect_info': 'No defects detected',
+    'defect_types': [],
+    'confidences': []
+}
+latest_detection_info_lock = threading.Lock()
 
 class CameraStream:
     def __init__(self):
@@ -300,6 +308,10 @@ def detect_defects(frame):
         model_instance = get_model()
         if model_instance is None:
             print("detect_defects: Failed to get model instance")
+            with latest_detection_info_lock:
+                latest_detection_info['defect_info'] = 'Model not available'
+                latest_detection_info['defect_types'] = []
+                latest_detection_info['confidences'] = []
             return frame
 
         # Run inference and visualization
@@ -310,12 +322,14 @@ def detect_defects(frame):
             save_path=None
         )
 
-        # Update the defect info in the frame
+        # Update the defect info in the frame and global variable
         if boxes:
             defect_types = [model_instance.class_names.get(c, str(c)) for c in class_ids]
             confidences = [f'{s*100:.2f}%' for s in scores]
             defect_info = f"Detected: {', '.join(defect_types)} ({', '.join(confidences)})"
         else:
+            defect_types = []
+            confidences = []
             defect_info = "No defects detected"
 
         # Add text overlay to the frame
@@ -329,10 +343,20 @@ def detect_defects(frame):
             2
         )
 
+        # Update global detection info
+        with latest_detection_info_lock:
+            latest_detection_info['defect_info'] = defect_info
+            latest_detection_info['defect_types'] = defect_types
+            latest_detection_info['confidences'] = confidences
+
         return result_image
 
     except Exception as e:
         print(f"Error in detect_defects: {e}")
+        with latest_detection_info_lock:
+            latest_detection_info['defect_info'] = f'Error: {e}'
+            latest_detection_info['defect_types'] = []
+            latest_detection_info['confidences'] = []
         return frame
 
 def process_image(image_path):
@@ -486,6 +510,12 @@ def shutdown():
     except Exception as e:
         print(f"Error in shutdown: {e}")
         return "Error releasing resources", 500
+
+@app.route('/live_status')
+def live_status():
+    with latest_detection_info_lock:
+        info = dict(latest_detection_info)
+    return jsonify(info)
 
 if __name__ == '__main__':
     try:
