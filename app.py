@@ -571,7 +571,10 @@ if __name__ == '__main__':
         print("Application starting...")
         release_camera() # Ensure camera manager is stopped at startup
         release_model()
-        app.run(host='0.0.0.0', port=5000, debug=True, threaded=True) # threaded=True to allow concurrent requests
+        # For development: use Flask's built-in server without debug/reloader for clean shutdown
+        app.run(host='0.0.0.0', port=5000, debug=False, threaded=True, use_reloader=False)
+        # For production: run with gunicorn using:
+        # gunicorn -w 1 -b 0.0.0.0:5000 app:app
     finally:
         print("Application exiting. Ensuring resources are released.")
         release_camera()
