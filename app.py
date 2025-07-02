@@ -305,20 +305,25 @@ def release_model():
                 print(f"release_model: Error destroying or releasing model: {e}")
                 model = None # Ensure model is cleared even if destroy fails partially
 
-def get_region(box, img_width, img_height):
+def get_regions_covered(box, img_width, img_height):
     x1, y1, x2, y2 = box
-    cx = (x1 + x2) / 2
-    cy = (y1 + y2) / 2
-    col = int(3 * cx / img_width)
-    row = int(3 * cy / img_height)
-    col = min(max(col, 0), 2)
-    row = min(max(row, 0), 2)
+    # Calculate grid boundaries
+    x_grid = [0, img_width/3, 2*img_width/3, img_width]
+    y_grid = [0, img_height/3, 2*img_height/3, img_height]
     regions = [
         ["top left", "top center", "top right"],
         ["middle left", "center", "middle right"],
         ["bottom left", "bottom center", "bottom right"]
     ]
-    return regions[row][col]
+    covered = set()
+    for row in range(3):
+        for col in range(3):
+            # Check if box overlaps this grid cell
+            cell_x1, cell_x2 = x_grid[col], x_grid[col+1]
+            cell_y1, cell_y2 = y_grid[row], y_grid[row+1]
+            if not (x2 < cell_x1 or x1 > cell_x2 or y2 < cell_y1 or y1 > cell_y2):
+                covered.add(regions[row][col])
+    return sorted(covered)
 
 def detect_defects(frame):
     try:
@@ -345,12 +350,12 @@ def detect_defects(frame):
             defect_types = [model_instance.class_names.get(c, str(c)) for c in class_ids]
             confidences = [f'{s*100:.2f}%' for s in scores]
             defect_info = f"Detected: {', '.join(defect_types)} ({', '.join(confidences)})"
-            # Log each detection in the history, including box coordinates and region
+            # Log each detection in the history, including box coordinates and all covered regions
             timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
             img_h, img_w = frame.shape[:2]
             for dt, conf, box in zip(defect_types, confidences, boxes):
-                region = get_region(box, img_w, img_h)
-                latest_detection_history.append({'type': dt, 'confidence': conf, 'timestamp': timestamp, 'box': box, 'region': region})
+                regions = get_regions_covered(box, img_w, img_h)
+                latest_detection_history.append({'type': dt, 'confidence': conf, 'timestamp': timestamp, 'box': box, 'regions': regions})
         else:
             defect_types = []
             confidences = []
