@@ -253,9 +253,8 @@
                     if (!tbody) return;
                     tbody.innerHTML = '';
                     if (data.history && data.history.length > 0) {
-                        const maxEntries = 10;
-                        const startIdx = Math.max(0, data.history.length - maxEntries);
-                        for (let i = data.history.length - 1; i >= startIdx; i--) {
+                        // Show all logs, scrollable
+                        for (let i = data.history.length - 1; i >= 0; i--) {
                             const item = data.history[i];
                             const tr = document.createElement('tr');
                             const tdType = document.createElement('td');
