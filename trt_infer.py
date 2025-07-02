@@ -290,14 +290,14 @@ class TensorRTInference:
                 del self.stream
                 self.stream = None
                 print("TensorRTInference: CUDA stream destroyed.")
-            
+
             # Free allocated buffers
-            for inp in self.inputs:
+            for inp in getattr(self, 'inputs', []):
                 if 'device' in inp and inp['device']:
                     cuda.mem_free(inp['device'])
                 if 'host' in inp and inp['host'] is not None:
                     del inp['host']
-            for out in self.outputs:
+            for out in getattr(self, 'outputs', []):
                 if 'device' in out and out['device']:
                     cuda.mem_free(out['device'])
                 if 'host' in out and out['host'] is not None:
@@ -306,19 +306,20 @@ class TensorRTInference:
             self.outputs = []
             self.bindings = []
             print("TensorRTInference: Buffers freed.")
-
-            # Pop the CUDA context last
-            if hasattr(self, 'cuda_ctx') and self.cuda_ctx:
-                # Only pop if it's the current context
-                current_ctx = cuda.Context.get_current()
-                if current_ctx == self.cuda_ctx:
-                    self.cuda_ctx.pop()
-                    print("TensorRTInference: CUDA context popped.")
-                else:
-                    print("TensorRTInference: CUDA context not current, skipping pop.")
-                # Ensure the reference is cleared
-                del self.cuda_ctx
-                self.cuda_ctx = None
-            print("TensorRTInference: Resources destruction complete.")
         except Exception as e:
             print(f"TensorRTInference: Error during resource destruction: {e}")
+        finally:
+            # Pop the CUDA context last, even if there was an error above
+            try:
+                if hasattr(self, 'cuda_ctx') and self.cuda_ctx:
+                    current_ctx = cuda.Context.get_current()
+                    if current_ctx == self.cuda_ctx:
+                        self.cuda_ctx.pop()
+                        print("TensorRTInference: CUDA context popped.")
+                    else:
+                        print("TensorRTInference: CUDA context not current, skipping pop.")
+                    del self.cuda_ctx
+                    self.cuda_ctx = None
+            except Exception as e:
+                print(f"TensorRTInference: Error popping CUDA context in finally: {e}")
+        print("TensorRTInference: Resources destruction complete.")

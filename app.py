@@ -298,12 +298,23 @@ def release_model():
         if model is not None:
             try:
                 print("release_model: Attempting to destroy model resources.")
-                model.destroy() # Explicitly call the destroy method
+                model.destroy()  # Explicitly call the destroy method
+                # Extra: Pop any remaining CUDA context
+                try:
+                    while True:
+                        ctx = cuda.Context.get_current()
+                        if ctx is not None:
+                            print("release_model: Popping lingering CUDA context.")
+                            ctx.pop()
+                        else:
+                            break
+                except Exception as e:
+                    print(f"release_model: No more CUDA context to pop or error: {e}")
                 model = None
                 print("release_model: Model released successfully.")
             except Exception as e:
                 print(f"release_model: Error destroying or releasing model: {e}")
-                model = None # Ensure model is cleared even if destroy fails partially
+                model = None  # Ensure model is cleared even if destroy fails partially
 
 def get_regions_covered(box, img_width, img_height):
     x1, y1, x2, y2 = box
