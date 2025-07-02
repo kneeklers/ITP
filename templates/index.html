@@ -56,6 +56,11 @@
             padding: 10px;
             border-radius: 5px;
         }
+        #detection-list {
+            max-height: 350px;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -170,10 +175,14 @@
                     if (!list) return;
                     list.innerHTML = '';
                     if (data.history && data.history.length > 0) {
-                        for (let i = data.history.length - 1; i >= 0; i--) {
+                        const maxEntries = 20;
+                        const startIdx = Math.max(0, data.history.length - maxEntries);
+                        for (let i = data.history.length - 1; i >= startIdx; i--) {
                             const item = data.history[i];
+                            let boxStr = item.box ? ` [${item.box.join(', ')}]` : '';
+                            let regionStr = item.region ? ` (${item.region})` : '';
                             const li = document.createElement('li');
-                            li.textContent = `${item.timestamp}: ${item.type} (${item.confidence})`;
+                            li.textContent = `${item.timestamp}: ${item.type} (${item.confidence})${boxStr}${regionStr}`;
                             list.appendChild(li);
                         }
                     } else {

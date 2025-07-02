@@ -305,6 +305,21 @@ def release_model():
                 print(f"release_model: Error destroying or releasing model: {e}")
                 model = None # Ensure model is cleared even if destroy fails partially
 
+def get_region(box, img_width, img_height):
+    x1, y1, x2, y2 = box
+    cx = (x1 + x2) / 2
+    cy = (y1 + y2) / 2
+    col = int(3 * cx / img_width)
+    row = int(3 * cy / img_height)
+    col = min(max(col, 0), 2)
+    row = min(max(row, 0), 2)
+    regions = [
+        ["top left", "top center", "top right"],
+        ["middle left", "center", "middle right"],
+        ["bottom left", "bottom center", "bottom right"]
+    ]
+    return regions[row][col]
+
 def detect_defects(frame):
     try:
         # Get model instance
@@ -330,10 +345,12 @@ def detect_defects(frame):
             defect_types = [model_instance.class_names.get(c, str(c)) for c in class_ids]
             confidences = [f'{s*100:.2f}%' for s in scores]
             defect_info = f"Detected: {', '.join(defect_types)} ({', '.join(confidences)})"
-            # Log each detection in the history
+            # Log each detection in the history, including box coordinates and region
             timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
-            for dt, conf in zip(defect_types, confidences):
-                latest_detection_history.append({'type': dt, 'confidence': conf, 'timestamp': timestamp})
+            img_h, img_w = frame.shape[:2]
+            for dt, conf, box in zip(defect_types, confidences, boxes):
+                region = get_region(box, img_w, img_h)
+                latest_detection_history.append({'type': dt, 'confidence': conf, 'timestamp': timestamp, 'box': box, 'region': region})
         else:
             defect_types = []
             confidences = []
