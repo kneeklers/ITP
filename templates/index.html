@@ -8,10 +8,31 @@
     <style>
         body {
             background-color: #f8f9fa;
+            font-family: 'Segoe UI', 'Arial', 'sans-serif';
         }
-        .navbar-brand {
-            font-weight: bold;
+        .navbar {
+            background-color: #fff !important;
+            border-bottom: 2px solid #e6e6e6;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+        }
+        .navbar-brand, .navbar-nav .nav-link, .navbar-text {
+            color: #003366 !important;
+            font-weight: 600;
             letter-spacing: 1px;
+        }
+        .navbar-logo {
+            height: 38px;
+            margin-right: 16px;
+        }
+        .btn-primary {
+            background-color: #003366;
+            border-color: #003366;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+        .btn-primary:hover, .btn-primary:focus {
+            background-color: #E60012;
+            border-color: #E60012;
         }
         .video-container {
             position: relative;
@@ -58,11 +79,25 @@
         .card {
             border-radius: 12px;
             box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            border: 1px solid #e6e6e6;
         }
         #detection-list {
             max-height: 350px;
             overflow-y: auto;
             padding-right: 10px;
+        }
+        .defect-info h6 {
+            color: #003366;
+            font-weight: 600;
+        }
+        .card-title {
+            color: #003366;
+            font-weight: 700;
+        }
+        .detection-log-title {
+            border-bottom: 1px solid #e6e6e6;
+            padding-bottom: 8px;
+            margin-bottom: 18px;
         }
         @media (max-width: 991.98px) {
             .video-log-col {
@@ -72,9 +107,12 @@
     </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <nav class="navbar navbar-expand-lg navbar-light">
         <div class="container">
-            <a class="navbar-brand" href="#">Metal Sheet Defect Detection</a>
+            <a class="navbar-brand d-flex align-items-center" href="#">
+                <img src="{{ url_for('static', filename='astar_logo.png') }}" alt="A*STAR Logo" class="navbar-logo">
+                Metal Sheet Defect Detection
+            </a>
             <div class="ms-auto">
                 <a href="/upload" class="btn btn-primary">Upload Image for Analysis</a>
             </div>
@@ -104,7 +142,7 @@
             <div class="col-lg-5 video-log-col">
                 <div class="card">
                     <div class="card-body">
-                        <h5 class="card-title text-center mb-3">Live Detection Log</h5>
+                        <h5 class="card-title text-center mb-3 detection-log-title">Live Detection Log</h5>
                         <div class="defect-info mb-2">
                             <h6>Detection Status</h6>
                             <p id="defect-status" class="mb-0">No defects detected</p>
