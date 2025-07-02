@@ -558,4 +558,15 @@ if __name__ == '__main__':
     finally:
         print("Application exiting. Ensuring resources are released.")
         release_camera()
-        release_model() 
+        release_model()
+        # Pop any lingering CUDA contexts to avoid PyCUDA shutdown errors
+        import pycuda.driver as cuda
+        try:
+            while True:
+                ctx = cuda.Context.get_current()
+                if ctx is None:
+                    break
+                ctx.pop()
+                print("Popped a lingering CUDA context on exit.")
+        except Exception as e:
+            print("Error popping CUDA context on exit:", e) 
