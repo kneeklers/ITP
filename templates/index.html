@@ -149,7 +149,21 @@
                         </div>
                         <div class="mt-3" id="detection-details">
                             <h6>Detection Log</h6>
-                            <ul id="detection-list" class="mb-0"></ul>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered align-middle mb-0" style="background: #fff;">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Type</th>
+                                            <th>Confidence</th>
+                                            <th>Box</th>
+                                            <th>Regions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="detection-table-body">
+                                        <!-- JS will populate rows here -->
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -190,33 +204,48 @@
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('defect-status').textContent = data.defect_info;
-                    const list = document.getElementById('detection-list');
-                    if (!list) return;
-                    list.innerHTML = '';
+                    const tbody = document.getElementById('detection-table-body');
+                    if (!tbody) return;
+                    tbody.innerHTML = '';
                     if (data.history && data.history.length > 0) {
                         const maxEntries = 20;
                         const startIdx = Math.max(0, data.history.length - maxEntries);
                         for (let i = data.history.length - 1; i >= startIdx; i--) {
                             const item = data.history[i];
-                            let boxStr = item.box ? ` [${item.box.join(', ')}]` : '';
-                            let regionsStr = (item.regions && item.regions.length > 0) ? ` (${item.regions.join(', ')})` : '';
-                            const li = document.createElement('li');
-                            li.textContent = `${item.timestamp}: ${item.type} (${item.confidence})${boxStr}${regionsStr}`;
-                            list.appendChild(li);
+                            const tr = document.createElement('tr');
+                            const tdType = document.createElement('td');
+                            tdType.textContent = item.type || '';
+                            const tdConf = document.createElement('td');
+                            tdConf.textContent = item.confidence || '';
+                            const tdBox = document.createElement('td');
+                            tdBox.textContent = item.box ? `[${item.box.join(', ')}]` : '';
+                            const tdRegions = document.createElement('td');
+                            tdRegions.textContent = (item.regions && item.regions.length > 0) ? item.regions.join(', ') : '';
+                            tr.appendChild(tdType);
+                            tr.appendChild(tdConf);
+                            tr.appendChild(tdBox);
+                            tr.appendChild(tdRegions);
+                            tbody.appendChild(tr);
                         }
                     } else {
-                        const li = document.createElement('li');
-                        li.textContent = 'No defects detected yet.';
-                        list.appendChild(li);
+                        const tr = document.createElement('tr');
+                        const td = document.createElement('td');
+                        td.colSpan = 4;
+                        td.textContent = 'No defects detected yet.';
+                        tr.appendChild(td);
+                        tbody.appendChild(tr);
                     }
                 })
                 .catch(err => {
-                    const list = document.getElementById('detection-list');
-                    if (!list) return;
-                    list.innerHTML = '';
-                    const li = document.createElement('li');
-                    li.textContent = 'Error fetching detection details';
-                    list.appendChild(li);
+                    const tbody = document.getElementById('detection-table-body');
+                    if (!tbody) return;
+                    tbody.innerHTML = '';
+                    const tr = document.createElement('tr');
+                    const td = document.createElement('td');
+                    td.colSpan = 4;
+                    td.textContent = 'Error fetching detection details';
+                    tr.appendChild(td);
+                    tbody.appendChild(tr);
                 });
         }
         setInterval(updateDetectionDetails, 1000);
