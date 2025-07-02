@@ -460,8 +460,15 @@ def generate_frames():
 def index():
     try:
         print("Accessing index route")
+        print("Releasing model before starting live stream...")
         release_model() # Release model if moving to live stream
-        camera_manager.start() # Ensure camera stream is running
+        time.sleep(0.3) # Give time for model to release
+        print("Ensuring camera stream is running...")
+        if not camera_manager.running:
+            camera_manager.start() # Ensure camera stream is running
+            print("Camera stream started.")
+        else:
+            print("Camera stream already running.")
         time.sleep(0.5) # Give the camera stream a moment to start
         return render_template('index.html')
     except Exception as e:
@@ -482,10 +489,11 @@ def video_feed():
 def upload_page():
     try:
         print("Accessing upload page")
-        # Stop camera stream FIRST, then release model
+        print("Releasing camera and model before upload...")
         release_camera() # This will now aggressively stop the CameraStream thread
         time.sleep(0.75) # Add a short delay to allow camera resources to fully release
         release_model() # Ensure model is released before processing
+        time.sleep(0.3) # Give time for model to release
 
         if request.method == 'POST':
             try:
@@ -511,8 +519,6 @@ def upload_page():
                 # Process the image from the saved original path
                 result = process_image(original_save_path)
                 print(f"Processing result: {result}")
-                
-                # No longer delete the original file here as it's saved in static/uploaded_originals for display
                 
                 if result is None:
                     return render_template('upload.html', result=None, error="Error processing image")
