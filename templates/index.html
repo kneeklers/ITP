@@ -104,6 +104,16 @@
                 margin-top: 30px;
             }
         }
+        #detection-table-body {
+            display: block;
+            max-height: 320px;
+            overflow-y: auto;
+        }
+        #detection-table-body tr {
+            display: table;
+            width: 100%;
+            table-layout: fixed;
+        }
     </style>
 </head>
 <body>
@@ -208,7 +218,7 @@
                     if (!tbody) return;
                     tbody.innerHTML = '';
                     if (data.history && data.history.length > 0) {
-                        const maxEntries = 20;
+                        const maxEntries = 10;
                         const startIdx = Math.max(0, data.history.length - maxEntries);
                         for (let i = data.history.length - 1; i >= startIdx; i--) {
                             const item = data.history[i];
