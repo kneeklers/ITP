@@ -424,11 +424,24 @@ def process_image(image_path):
         result_path = os.path.join('static/results', result_filename)
         cv2.imwrite(result_path, result_image)
 
+        # Prepare detailed detection info
+        img_h, img_w = image.shape[:2]
+        detailed = []
+        for c, s, box in zip(class_ids, scores, boxes):
+            regions = get_regions_covered(box, img_w, img_h)
+            detailed.append({
+                'type': model_instance.class_names.get(c, str(c)),
+                'confidence': f'{s*100:.2f}%',
+                'box': box,
+                'regions': regions
+            })
+
         # Prepare summary for the web page
         summary = {
             'defect_type': ', '.join([model_instance.class_names.get(c, str(c)) for c in class_ids]) if class_ids else 'None',
             'confidence': ', '.join([f'{s*100:.2f}' for s in scores]) if scores else '0.00',
             'result_image': result_filename,
+            'detailed': detailed,
             # original_image_path will be set by the upload_page route
         }
         return summary
