@@ -108,7 +108,7 @@
                                 <div class="card-body">
                                     {% if result.result_image %}
                                     <div class="text-center mb-3">
-                                        <img src="{{ url_for('static', filename='results/' + result.result_image) }}" class="img-fluid rounded" style="max-width: 180px; max-height: 220px;">
+                                        <img src="{{ url_for('static', filename='results/' + result.result_image) }}" class="img-fluid rounded" style="max-width: 100%; height: auto; display: block; margin: 0 auto;">
                                     </div>
                                     {% endif %}
                                     {% if result.detailed and result.detailed|length > 0 %}
