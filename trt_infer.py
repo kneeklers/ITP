@@ -235,17 +235,32 @@ class TensorRTInference:
             (text_width, text_height), baseline = cv2.getTextSize(
                 label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
             )
+            # Calculate top-left and bottom-right for label background
+            label_y1 = y1 - text_height - baseline - 5
+            label_y2 = y1
+            if label_y1 < 0:
+                # If label would go above the image, draw it inside the box
+                label_y1 = y1
+                label_y2 = y1 + text_height + baseline + 5
+                text_org = (x1, label_y2 - baseline - 2)
+            else:
+                text_org = (x1, y1 - baseline - 2)
+            # Make sure the label doesn't go off the right edge
+            label_x2 = min(x1 + text_width, result_image.shape[1] - 1)
+            if label_x2 > result_image.shape[1] - 1:
+                x1 = max(0, result_image.shape[1] - text_width - 1)
+                label_x2 = result_image.shape[1] - 1
             cv2.rectangle(
                 result_image,
-                (x1, max(0, y1 - text_height - baseline - 5)),
-                (x1 + text_width, y1),
+                (x1, label_y1),
+                (label_x2, label_y2),
                 color,
                 -1
             )
             cv2.putText(
                 result_image,
                 label,
-                (x1, max(text_height + baseline + 5, y1 - baseline - 5)),
+                text_org,
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
                 (255, 255, 255),
