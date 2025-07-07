@@ -264,9 +264,16 @@ class TensorRTInference:
         return output
     
     def infer_and_visualize(self, image, conf_threshold=0.5, nms_threshold=0.4, save_path=None):
+        border = 40  # Add 40px border to all sides
+        image_with_border = cv2.copyMakeBorder(
+            image, border, border, border, border,
+            cv2.BORDER_CONSTANT, value=[0, 0, 0]
+        )
         output = self.infer(image)
         boxes, scores, class_ids = self.postprocess(output, conf_threshold, nms_threshold)
-        result_image = self.draw_detections(image, boxes, scores, class_ids)
+        # Offset all boxes by the border size
+        boxes_offset = [[x1+border, y1+border, x2+border, y2+border] for (x1, y1, x2, y2) in boxes]
+        result_image = self.draw_detections(image_with_border, boxes_offset, scores, class_ids)
         if save_path:
             cv2.imwrite(save_path, result_image)
         return result_image, boxes, scores, class_ids
