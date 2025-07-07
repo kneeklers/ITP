@@ -1,187 +1,169 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Defect Detection - Upload Image</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            background-color: #f8f9fa;
-            font-family: 'Segoe UI', 'Arial', 'sans-serif';
-        }
-        .navbar {
-            background-color: #fff !important;
-            border-bottom: 2px solid #e6e6e6;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.03);
-        }
-        .navbar-brand, .navbar-nav .nav-link, .navbar-text {
-            color: #003366 !important;
-            font-weight: 600;
-            letter-spacing: 1px;
-        }
-        .navbar-logo {
-            height: 38px;
-            margin-right: 16px;
-        }
-        .btn-primary {
-            background-color: #003366;
-            border-color: #003366;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }
-        .btn-primary:hover, .btn-primary:focus {
-            background-color: #E60012;
-            border-color: #E60012;
-        }
-        .card {
-            border-radius: 12px;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-            border: 1px solid #e6e6e6;
-        }
-        .upload-card {
-            max-width: 500px;
-            margin: 40px auto 32px auto;
-            padding: 32px 24px 24px 24px;
-        }
-        .result-box {
-            margin-top: 20px;
-        }
-        .displayed-image {
-            max-width: 100%;
-            max-height: 350px;
-            margin-top: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-        }
-        .detected-card {
-            background-color: #eaf6fb;
-            border: 1px solid #b6e0f7;
-        }
-        .detected-card h4 {
-            color: #003366;
-            font-weight: 700;
-        }
-        .detected-card .confidence {
-            color: #007bff;
-            font-weight: 600;
-        }
-        .back-btn {
-            margin-top: 32px;
-        }
-        @media (max-width: 991.98px) {
-            .result-row {
-                flex-direction: column;
-            }
-            .result-col {
-                margin-bottom: 24px;
-            }
-        }
-    </style>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta name="description" content="" />
+    <meta name="author" content="" />
+    <title>Upload Image - Metal Sheet Defect Detection</title>
+    <link href="https://cdn.jsdelivr.net/npm/simple-datatables@7.1.2/dist/style.min.css" rel="stylesheet" />
+    <link href="/static/css/styles.css" rel="stylesheet" />
+    <script src="https://use.fontawesome.com/releases/v6.3.0/js/all.js" crossorigin="anonymous"></script>
 </head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-light">
-        <div class="container">
-            <a class="navbar-brand d-flex align-items-center" href="/">
-                <img src="{{ url_for('static', filename='astar_logo.png') }}" alt="A*STAR Logo" class="navbar-logo">
-                Metal Sheet Defect Detection
-            </a>
-            <div class="ms-auto">
-                <a href="/upload" class="btn btn-primary">Upload Image for Analysis</a>
-            </div>
-        </div>
+<body class="sb-nav-fixed">
+    <nav class="sb-topnav navbar navbar-expand navbar-dark bg-dark">
+        <a class="navbar-brand ps-3" href="/">Metal Sheet Defect Detection</a>
+        <button class="btn btn-link btn-sm order-1 order-lg-0 me-4 me-lg-0" id="sidebarToggle" href="#"><i class="fas fa-bars"></i></button>
+        <ul class="navbar-nav ms-auto ms-md-0 me-3 me-lg-4">
+            <li class="nav-item dropdown">
+                <a class="nav-link dropdown-toggle" id="navbarDropdown" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="fas fa-user fa-fw"></i></a>
+                <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdown">
+                    <li><a class="dropdown-item" href="/upload">Upload Image for Analysis</a></li>
+                    <li><hr class="dropdown-divider" /></li>
+                    <li><a class="dropdown-item" href="#">Logout</a></li>
+                </ul>
+            </li>
+        </ul>
     </nav>
-
-    <div class="container">
-        <div class="card upload-card">
-            <h2 class="text-center mb-4">Metal Sheet Defect Detection</h2>
-            <form action="/upload" method="post" enctype="multipart/form-data" id="uploadForm">
-                <div class="mb-3">
-                    <label for="image" class="form-label">Upload Image</label>
-                    <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
-                </div>
-                <button type="submit" class="btn btn-primary w-100" id="submitBtn">Analyze Image</button>
-                <div class="loading" id="loading" style="display:none;">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
+    <div id="layoutSidenav">
+        <div id="layoutSidenav_nav">
+            <nav class="sb-sidenav accordion sb-sidenav-dark" id="sidenavAccordion">
+                <div class="sb-sidenav-menu">
+                    <div class="nav">
+                        <div class="sb-sidenav-menu-heading">Core</div>
+                        <a class="nav-link" href="/">
+                            <div class="sb-nav-link-icon"><i class="fas fa-tachometer-alt"></i></div>
+                            Dashboard
+                        </a>
+                        <div class="sb-sidenav-menu-heading">Addons</div>
+                        <a class="nav-link" href="/upload">
+                            <div class="sb-nav-link-icon"><i class="fas fa-upload"></i></div>
+                            Upload Image
+                        </a>
                     </div>
-                    <span class="ms-2">Processing image...</span>
                 </div>
-            </form>
-            <div id="preview" class="preview-image"></div>
-            {% if error %}
-            <div class="alert alert-danger mt-3">
-                {{ error }}
-            </div>
-            {% endif %}
+                <div class="sb-sidenav-footer">
+                    <div class="small">Logged in as:</div>
+                    Metal Sheet Defect Detection
+                </div>
+            </nav>
         </div>
-
-        {% if result %}
-        <div class="row result-row justify-content-center align-items-start g-4 result-box">
-            <div class="col-md-5 result-col">
-                <div class="card p-3 h-100">
-                    <h5 class="text-center mb-3">Original Image</h5>
-                    {% if original_image_url %}
-                    <img src="{{ original_image_url }}" class="displayed-image mx-auto d-block">
-                    {% else %}
-                    <p class="text-center">No original image to display.</p>
-                    {% endif %}
-                </div>
-            </div>
-            <div class="col-md-7 result-col">
-                <div class="card detected-card p-3 h-100 d-flex flex-column justify-content-center">
-                    <h5 class="text-center mb-3">Detected Image</h5>
-                    <div class="d-flex flex-row align-items-center justify-content-center flex-wrap flex-md-nowrap" style="min-height: 220px;">
-                        {% if result.result_image %}
-                        <div class="flex-shrink-0 me-4 mb-3 mb-md-0 text-center">
-                            <img src="{{ url_for('static', filename='results/' + result.result_image) }}" class="displayed-image mx-auto d-block" style="max-width: 180px; max-height: 220px;">
-                        </div>
-                        {% endif %}
-                        <div class="flex-grow-1">
-                            <div class="alert alert-info mb-0">
-                                <h4 class="mb-2">Defect Type: {{ result.defect_type }}</h4>
-                                <div class="confidence">Confidence: {{ result.confidence }}%</div>
+        <div id="layoutSidenav_content">
+            <main>
+                <div class="container-fluid px-4">
+                    <h1 class="mt-4">Upload Image for Analysis</h1>
+                    <ol class="breadcrumb mb-4">
+                        <li class="breadcrumb-item"><a href="/">Dashboard</a></li>
+                        <li class="breadcrumb-item active">Upload</li>
+                    </ol>
+                    <div class="row justify-content-center">
+                        <div class="col-lg-7 col-xl-6">
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <i class="fas fa-upload me-1"></i>
+                                    Upload Image
+                                </div>
+                                <div class="card-body">
+                                    <form action="/upload" method="post" enctype="multipart/form-data" id="uploadForm">
+                                        <div class="mb-3">
+                                            <label for="image" class="form-label">Select Image</label>
+                                            <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary w-100" id="submitBtn">Analyze Image</button>
+                                        <div class="loading mt-3" id="loading" style="display:none;">
+                                            <div class="spinner-border text-primary" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                            <span class="ms-2">Processing image...</span>
+                                        </div>
+                                    </form>
+                                    <div id="preview" class="preview-image mt-3"></div>
+                                    {% if error %}
+                                    <div class="alert alert-danger mt-3">
+                                        {{ error }}
+                                    </div>
+                                    {% endif %}
+                                </div>
                             </div>
                         </div>
                     </div>
-                    {% if result.detailed and result.detailed|length > 0 %}
-                    <div class="mt-4">
-                        <h6 class="mb-2">Detailed Detections</h6>
-                        <div class="table-responsive">
-                            <table class="table table-sm table-bordered align-middle mb-0" style="background: #fff;">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Type</th>
-                                        <th>Confidence</th>
-                                        <th>Box</th>
-                                        <th>Regions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                {% for det in result.detailed %}
-                                    <tr>
-                                        <td>{{ det.type }}</td>
-                                        <td>{{ det.confidence }}</td>
-                                        <td>[{{ det.box|join(', ') }}]</td>
-                                        <td>{{ det.regions|join(', ') }}</td>
-                                    </tr>
-                                {% endfor %}
-                                </tbody>
-                            </table>
+                    {% if result %}
+                    <div class="row justify-content-center align-items-start g-4 mb-4">
+                        <div class="col-md-5">
+                            <div class="card h-100">
+                                <div class="card-header">Original Image</div>
+                                <div class="card-body text-center">
+                                    {% if original_image_url %}
+                                    <img src="{{ original_image_url }}" class="img-fluid rounded mb-2" style="max-height: 350px;">
+                                    {% else %}
+                                    <p class="text-center">No original image to display.</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-7">
+                            <div class="card h-100">
+                                <div class="card-header">Detection Results</div>
+                                <div class="card-body">
+                                    {% if result.result_image %}
+                                    <div class="text-center mb-3">
+                                        <img src="{{ url_for('static', filename='results/' + result.result_image) }}" class="img-fluid rounded" style="max-width: 180px; max-height: 220px;">
+                                    </div>
+                                    {% endif %}
+                                    <div class="alert alert-info mb-3">
+                                        <h5 class="mb-2">Defect Type: {{ result.defect_type }}</h5>
+                                        <div class="fw-bold">Confidence: {{ result.confidence }}%</div>
+                                    </div>
+                                    {% if result.detailed and result.detailed|length > 0 %}
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-bordered align-middle mb-0">
+                                            <thead class="table-light">
+                                                <tr>
+                                                    <th>Type</th>
+                                                    <th>Confidence</th>
+                                                    <th>Box</th>
+                                                    <th>Regions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                            {% for det in result.detailed %}
+                                                <tr>
+                                                    <td>{{ det.type }}</td>
+                                                    <td>{{ det.confidence }}</td>
+                                                    <td>[{{ det.box|join(', ') }}]</td>
+                                                    <td>{{ det.regions|join(', ') }}</td>
+                                                </tr>
+                                            {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
                         </div>
                     </div>
                     {% endif %}
+                    <div class="text-center mb-4">
+                        <a href="/" class="btn btn-secondary">Back to Dashboard</a>
+                    </div>
                 </div>
-            </div>
-        </div>
-        {% endif %}
-
-        <div class="text-center back-btn">
-            <a href="/" class="btn btn-secondary">Back to Live Stream</a>
+            </main>
+            <footer class="py-4 bg-light mt-auto">
+                <div class="container-fluid px-4">
+                    <div class="d-flex align-items-center justify-content-between small">
+                        <div class="text-muted">Copyright &copy; Your Website 2023</div>
+                        <div>
+                            <a href="#">Privacy Policy</a>
+                            &middot;
+                            <a href="#">Terms &amp; Conditions</a>
+                        </div>
+                    </div>
+                </div>
+            </footer>
         </div>
     </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" crossorigin="anonymous"></script>
     <script>
         // Preview image before upload
         document.getElementById('image').addEventListener('change', function(e) {
@@ -190,12 +172,11 @@
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     const preview = document.getElementById('preview');
-                    preview.innerHTML = `<img src="${e.target.result}" class="img-fluid displayed-image mx-auto d-block">`;
+                    preview.innerHTML = `<img src="${e.target.result}" class="img-fluid rounded mx-auto d-block" style="max-height: 250px;">`;
                 }
                 reader.readAsDataURL(file);
             }
         });
-
         // Show loading state during form submission
         document.getElementById('uploadForm').addEventListener('submit', function() {
             document.getElementById('loading').style.display = 'block';
