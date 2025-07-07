@@ -222,6 +222,8 @@ class TensorRTInference:
     
     def draw_detections(self, image, boxes, scores, class_ids):
         result_image = image.copy()
+        label_positions = []  # Keep track of label y-ranges and x-ranges
+
         for i, (box, score, class_id) in enumerate(zip(boxes, scores, class_ids)):
             x1, y1, x2, y2 = box
             x1 = max(0, x1)
@@ -235,26 +237,41 @@ class TensorRTInference:
             (text_width, text_height), baseline = cv2.getTextSize(
                 label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2
             )
-            # Calculate top-left and bottom-right for label background
+
+            # Default label position above the box
             label_y1 = y1 - text_height - baseline - 5
             label_y2 = y1
-            draw_x1 = x1  # Default: draw at x1
+            draw_x1 = x1
             if label_y1 < 0:
-                # If label would go above the image, draw it inside the box
                 label_y1 = y1
                 label_y2 = y1 + text_height + baseline + 5
-                text_org = (x1, label_y2 - baseline - 2)
+                text_org = (draw_x1, label_y2 - baseline - 2)
             else:
-                text_org = (x1, y1 - baseline - 2)
-            label_x2 = x1 + text_width
+                text_org = (draw_x1, y1 - baseline - 2)
+            label_x2 = draw_x1 + text_width
             if label_x2 > result_image.shape[1] - 1:
-                # Shift left so the label fits
                 shift = label_x2 - (result_image.shape[1] - 1)
                 draw_x1 = x1 - shift
                 if draw_x1 < 0:
                     draw_x1 = 0
                 label_x2 = draw_x1 + text_width
                 text_org = (draw_x1, text_org[1])
+
+            # --- Prevent overlap with previous labels ---
+            margin = 2
+            while any(
+                abs(label_y1 - prev_y2) < (text_height + baseline + margin)
+                and not (label_x2 < prev_x1 or draw_x1 > prev_x2)
+                for (prev_y1, prev_y2, prev_x1, prev_x2) in label_positions
+            ):
+                # Shift label down by its height + margin
+                label_y1 += text_height + baseline + margin
+                label_y2 += text_height + baseline + margin
+                text_org = (draw_x1, label_y2 - baseline - 2 if label_y1 > y1 else y1 - baseline - 2)
+                if label_y2 > result_image.shape[0]:
+                    break
+
+            label_positions.append((label_y1, label_y2, draw_x1, label_x2))
             cv2.rectangle(
                 result_image,
                 (draw_x1, label_y1),
