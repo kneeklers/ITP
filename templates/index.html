@@ -96,7 +96,7 @@
                         <div class="col-12 d-flex justify-content-end align-items-center mb-2">
                             <button id="startLoggingBtn" class="btn btn-success me-2">Start Logging</button>
                             <button id="stopLoggingBtn" class="btn btn-danger">Stop Logging</button>
-                            <span id="loggingStatus" class="ms-3 fw-bold text-success">Logging Active</span>
+                            <span id="loggingStatus" class="ms-3 fw-bold text-danger">Logging Paused</span>
                         </div>
                     </div>
                     <div class="row mb-4">
@@ -238,7 +238,7 @@
                     // Update table
                     const tbody = document.getElementById('detectionLogBody');
                     tbody.innerHTML = '';
-                    (data.history || []).slice(-20).reverse().forEach(item => {
+                    (data.history || []).slice().reverse().forEach(item => {
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
                             <td>${item.type || ''}</td>
@@ -308,7 +308,7 @@
 
         window.onload = function() {
             initCharts();
-            startPolling();
+            setLoggingStatus(false);
         };
     </script>
 </body>
