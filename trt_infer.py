@@ -238,6 +238,7 @@ class TensorRTInference:
             # Calculate top-left and bottom-right for label background
             label_y1 = y1 - text_height - baseline - 5
             label_y2 = y1
+            draw_x1 = x1  # Default: draw at x1
             if label_y1 < 0:
                 # If label would go above the image, draw it inside the box
                 label_y1 = y1
@@ -245,14 +246,18 @@ class TensorRTInference:
                 text_org = (x1, label_y2 - baseline - 2)
             else:
                 text_org = (x1, y1 - baseline - 2)
-            # Make sure the label doesn't go off the right edge
-            label_x2 = min(x1 + text_width, result_image.shape[1] - 1)
+            label_x2 = x1 + text_width
             if label_x2 > result_image.shape[1] - 1:
-                x1 = max(0, result_image.shape[1] - text_width - 1)
-                label_x2 = result_image.shape[1] - 1
+                # Shift left so the label fits
+                shift = label_x2 - (result_image.shape[1] - 1)
+                draw_x1 = x1 - shift
+                if draw_x1 < 0:
+                    draw_x1 = 0
+                label_x2 = draw_x1 + text_width
+                text_org = (draw_x1, text_org[1])
             cv2.rectangle(
                 result_image,
-                (x1, label_y1),
+                (draw_x1, label_y1),
                 (label_x2, label_y2),
                 color,
                 -1
