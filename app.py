@@ -49,7 +49,7 @@ latest_detection_info_lock = threading.Lock()
 latest_detection_history = []  # List of dicts: {'type': ..., 'confidence': ..., 'timestamp': ...}
 
 # Add global variable for logging control
-logging_enabled = True
+logging_enabled = False
 
 class CameraStream:
     def __init__(self):
