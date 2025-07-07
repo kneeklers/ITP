@@ -48,6 +48,9 @@ latest_detection_info_lock = threading.Lock()
 # Add global variable for detection history
 latest_detection_history = []  # List of dicts: {'type': ..., 'confidence': ..., 'timestamp': ...}
 
+# Add global variable for logging control
+logging_enabled = True
+
 class CameraStream:
     def __init__(self):
         self._camera_instance = None # Private instance of VideoCapture
@@ -337,6 +340,7 @@ def get_regions_covered(box, img_width, img_height):
     return sorted(covered)
 
 def detect_defects(frame):
+    global logging_enabled
     try:
         # Get model instance
         model_instance = get_model()
@@ -364,9 +368,10 @@ def detect_defects(frame):
             # Log each detection in the history, including box coordinates and all covered regions
             timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
             img_h, img_w = frame.shape[:2]
-            for dt, conf, box in zip(defect_types, confidences, boxes):
-                regions = get_regions_covered(box, img_w, img_h)
-                latest_detection_history.append({'type': dt, 'confidence': conf, 'timestamp': timestamp, 'box': box, 'regions': regions})
+            if logging_enabled:
+                for dt, conf, box in zip(defect_types, confidences, boxes):
+                    regions = get_regions_covered(box, img_w, img_h)
+                    latest_detection_history.append({'type': dt, 'confidence': conf, 'timestamp': timestamp, 'box': box, 'regions': regions})
         else:
             defect_types = []
             confidences = []
@@ -578,6 +583,20 @@ def live_status():
     info['history'] = list(latest_detection_history)
     print('LIVE STATUS RESPONSE:', info)
     return jsonify(info)
+
+@app.route('/start_logging', methods=['POST'])
+def start_logging():
+    global logging_enabled
+    logging_enabled = True
+    print("Detection logging started.")
+    return jsonify({'status': 'started'})
+
+@app.route('/stop_logging', methods=['POST'])
+def stop_logging():
+    global logging_enabled
+    logging_enabled = False
+    print("Detection logging stopped.")
+    return jsonify({'status': 'stopped'})
 
 if __name__ == '__main__':
     try:

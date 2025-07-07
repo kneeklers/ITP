@@ -93,6 +93,13 @@
                         <li class="breadcrumb-item active">Dashboard</li>
                     </ol>
                     <div class="row mb-4">
+                        <div class="col-12 d-flex justify-content-end align-items-center mb-2">
+                            <button id="startLoggingBtn" class="btn btn-success me-2">Start Logging</button>
+                            <button id="stopLoggingBtn" class="btn btn-danger">Stop Logging</button>
+                            <span id="loggingStatus" class="ms-3 fw-bold text-success">Logging Active</span>
+                        </div>
+                    </div>
+                    <div class="row mb-4">
                         <div class="col-12">
                             <div class="card video-feed-card position-relative">
                                 <div class="card-header">Live Video Feed</div>
@@ -266,10 +273,42 @@
                     barChart.update();
                 });
         }
+        let pollingInterval = null;
+        let loggingActive = true;
+
+        function setLoggingStatus(active) {
+            loggingActive = active;
+            document.getElementById('loggingStatus').textContent = active ? 'Logging Active' : 'Logging Paused';
+            document.getElementById('loggingStatus').className = 'ms-3 fw-bold ' + (active ? 'text-success' : 'text-danger');
+        }
+
+        function startPolling() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            updateDashboard();
+            pollingInterval = setInterval(updateDashboard, 1000);
+            setLoggingStatus(true);
+        }
+        function stopPolling() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            setLoggingStatus(false);
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('startLoggingBtn').addEventListener('click', function() {
+                fetch('/start_logging', {method: 'POST'})
+                    .then(r => r.json())
+                    .then(() => startPolling());
+            });
+            document.getElementById('stopLoggingBtn').addEventListener('click', function() {
+                fetch('/stop_logging', {method: 'POST'})
+                    .then(r => r.json())
+                    .then(() => stopPolling());
+            });
+        });
+
         window.onload = function() {
             initCharts();
-            updateDashboard();
-            setInterval(updateDashboard, 1000);
+            startPolling();
         };
     </script>
 </body>
