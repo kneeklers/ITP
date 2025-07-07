@@ -224,6 +224,10 @@ class TensorRTInference:
         result_image = image.copy()
         label_positions = []  # Keep track of label y-ranges and x-ranges
 
+        def is_light(color):
+            # Simple luminance check (OpenCV uses BGR)
+            return (0.299*color[2] + 0.587*color[1] + 0.114*color[0]) > 186
+
         for i, (box, score, class_id) in enumerate(zip(boxes, scores, class_ids)):
             x1, y1, x2, y2 = box
             x1 = max(0, x1)
@@ -272,6 +276,8 @@ class TensorRTInference:
                     break
 
             label_positions.append((label_y1, label_y2, draw_x1, label_x2))
+            # Choose text color based on background
+            text_color = (0, 0, 0) if is_light(color) else (255, 255, 255)
             cv2.rectangle(
                 result_image,
                 (draw_x1, label_y1),
@@ -285,7 +291,7 @@ class TensorRTInference:
                 text_org,
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
-                (255, 255, 255),
+                text_color,
                 2
             )
         return result_image
